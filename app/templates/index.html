@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <h2>Single Label Review</h2>
+  <p class="help-text">Upload one label image and enter application fields. You can paste JSON or fill the form fields directly.</p>
+
+  <div
+    id="ocr-status-banner"
+    class="alert alert-ocr alert-ocr-{{ ocr_status.state }}"
+    data-ocr-state="{{ ocr_status.state }}"
+    data-ocr-ready="{{ 'true' if ocr_status.ready else 'false' }}"
+  >
+    <strong>OCR Status:</strong> <span id="ocr-status-message">{{ ocr_status.message }}</span>
+    {% if ocr_status.error %}
+    <div class="ocr-error" id="ocr-status-error">{{ ocr_status.error }}</div>
+    {% else %}
+    <div class="ocr-error" id="ocr-status-error" hidden></div>
+    {% endif %}
+  </div>
+
+  {% if error_message %}
+  <div class="alert alert-error">{{ error_message }}</div>
+  {% endif %}
+
+  <form action="/ui/analyze" method="post" enctype="multipart/form-data" class="review-form" id="review-form">
+    <fieldset class="mode-selector" id="review-mode-selector">
+      <legend>Review Mode</legend>
+      <label class="mode-option {% if form_values.review_mode == 'label_only' %}mode-option-active{% endif %}">
+        <input type="radio" name="review_mode" value="label_only" {% if form_values.review_mode == 'label_only' %}checked{% endif %}>
+        <span>Label-Only Review</span>
+      </label>
+      <label class="mode-option {% if form_values.review_mode == 'compare_application' %}mode-option-active{% endif %}">
+        <input type="radio" name="review_mode" value="compare_application" {% if form_values.review_mode == 'compare_application' %}checked{% endif %}>
+        <span>Compare to Application Data</span>
+      </label>
+      <p class="field-note" id="review-mode-help">
+        Label-Only Review is the default for fast screening. Switch to Compare mode when you want side-by-side validation against submitted values.
+      </p>
+    </fieldset>
+
+    <div class="form-row">
+      <label for="image">Label Image</label>
+      <input id="image" name="image" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" required>
+      <p class="field-note">Accepted: PNG, JPG, JPEG, WEBP.</p>
+    </div>
+
+    <section id="compare-inputs" class="compare-inputs {% if form_values.review_mode != 'compare_application' %}compare-inputs-hidden{% endif %}">
+      <div class="two-col">
+        <div class="form-row">
+          <label for="brand_name">Brand Name</label>
+          <input id="brand_name" name="brand_name" type="text" value="{{ form_values.brand_name }}">
+        </div>
+        <div class="form-row">
+          <label for="class_type">Class / Type</label>
+          <input id="class_type" name="class_type" type="text" value="{{ form_values.class_type }}">
+        </div>
+        <div class="form-row">
+          <label for="alcohol_content">Alcohol Content</label>
+          <input id="alcohol_content" name="alcohol_content" type="text" value="{{ form_values.alcohol_content }}" placeholder="e.g. 45% Alc./Vol. or 90 Proof">
+        </div>
+        <div class="form-row">
+          <label for="net_contents">Net Contents</label>
+          <input id="net_contents" name="net_contents" type="text" value="{{ form_values.net_contents }}" placeholder="e.g. 750 mL">
+        </div>
+        <div class="form-row">
+          <label for="bottler_producer">Bottler / Producer</label>
+          <input id="bottler_producer" name="bottler_producer" type="text" value="{{ form_values.bottler_producer }}">
+        </div>
+        <div class="form-row">
+          <label for="country_of_origin">Country of Origin</label>
+          <input id="country_of_origin" name="country_of_origin" type="text" value="{{ form_values.country_of_origin }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label for="government_warning">Government Warning Statement</label>
+        <textarea id="government_warning" name="government_warning" rows="4" placeholder="Paste full warning statement here">{{ form_values.government_warning }}</textarea>
+      </div>
+
+      <details class="json-box">
+        <summary>Optional: paste full <code>application_json</code></summary>
+        <div class="form-row">
+          <label for="application_json">Application JSON</label>
+          <textarea id="application_json" name="application_json" rows="8" placeholder='{"brand_name":"...","class_type":"..."}'>{{ form_values.application_json }}</textarea>
+          <p class="field-note">If valid JSON is provided, it overrides individual field inputs.</p>
+        </div>
+        <button type="button" id="fill-json-btn" class="button button-secondary">Fill JSON From Form Fields</button>
+      </details>
+    </section>
+
+    <div class="form-actions">
+      <button type="submit" id="analyze-btn" class="button button-primary" {% if not ocr_status.ready %}disabled{% endif %}>Analyze Label</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h3>What You’ll See</h3>
+  <ul>
+    <li>OCR-extracted text and confidence-backed evidence.</li>
+    <li>Field-by-field comparison with status badges.</li>
+    <li>Overall recommendation with review reasons.</li>
+  </ul>
+  <a href="/ui/batch" class="button button-secondary">Go To Batch Mode</a>
+  {% if enable_diagnostics_ui %}
+  <a href="/ui/diagnostics" class="button button-secondary">Developer Diagnostics</a>
+  {% endif %}
+</section>
+{% endblock %}

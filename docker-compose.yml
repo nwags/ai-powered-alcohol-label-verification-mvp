@@ -1,9 +1,14 @@
-version: "3.9"
 
 services:
   web:
     build: .
+    container_name: alcohol-label-web
     ports:
       - "8000:8000"
-    env_file:
-      - .env.example
+    env_file: .env.example
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

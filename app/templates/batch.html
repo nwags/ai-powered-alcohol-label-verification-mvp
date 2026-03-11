@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <h2>Batch Label Review</h2>
+  <p class="help-text">Upload a CSV or JSON file of application records and a ZIP of label images. Processing runs in this request for MVP demos.</p>
+
+  {% if error_message %}
+  <div class="alert alert-error">{{ error_message }}</div>
+  {% endif %}
+
+  <form method="post" action="/ui/batch" enctype="multipart/form-data" class="review-form">
+    <div class="form-row">
+      <label for="batch_file">Batch Data File (CSV or JSON)</label>
+      <input id="batch_file" name="batch_file" type="file" accept=".csv,.json" required>
+      <p class="field-note">Include `record_id` and `image_filename` columns/fields plus application fields.</p>
+    </div>
+    <div class="form-row">
+      <label for="images_archive">Images ZIP</label>
+      <input id="images_archive" name="images_archive" type="file" accept=".zip">
+      <p class="field-note">ZIP should contain image files referenced by `image_filename`.</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button button-primary">Run Batch Analysis</button>
+    </div>
+  </form>
+</section>
+
+{% if batch_response %}
+<section class="card">
+  <h3>Batch Summary</h3>
+  <p class="help-text">Batch ID: <code>{{ batch_response.batch_id }}</code></p>
+  <div class="two-col">
+    <p><strong>Total:</strong> {{ batch_response.summary.total }}</p>
+    <p><strong>Match:</strong> {{ batch_response.summary.match }}</p>
+    <p><strong>Normalized:</strong> {{ batch_response.summary.normalized_match }}</p>
+    <p><strong>Mismatch:</strong> {{ batch_response.summary.mismatch }}</p>
+    <p><strong>Review:</strong> {{ batch_response.summary.review }}</p>
+  </div>
+  <div class="form-actions">
+    {% if batch_response.artifacts.summary_json_url %}
+    <a class="button button-secondary" href="{{ batch_response.artifacts.summary_json_url }}" download>Download JSON Summary</a>
+    {% endif %}
+    {% if batch_response.artifacts.summary_csv_url %}
+    <a class="button button-secondary" href="{{ batch_response.artifacts.summary_csv_url }}" download>Download CSV Summary</a>
+    {% endif %}
+  </div>
+</section>
+
+{% if batch_response.errors %}
+<section class="card">
+  <h3>Batch Errors</h3>
+  <ul>
+    {% for error in batch_response.errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3>Record Results</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Record ID</th>
+          <th>Filename</th>
+          <th>Overall Status</th>
+          <th>Main Reason</th>
+          <th>Timing (ms)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in batch_response.results %}
+        <tr>
+          <td>{{ row.record_id }}</td>
+          <td>{{ row.image_filename or "-" }}</td>
+          <td><span class="badge badge-{{ row.overall_status.value }}">{{ row.overall_status.value }}</span></td>
+          <td>{{ row.main_reason or "-" }}</td>
+          <td>{{ row.timing_ms }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

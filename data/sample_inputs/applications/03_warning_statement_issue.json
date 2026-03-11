@@ -1,0 +1,12 @@
+{
+  "record_id": "warning-issue-001",
+  "image_filename": "label_warning_issue.jpg",
+  "brand_name": "Stone's Throw",
+  "class_type": "Whiskey",
+  "alcohol_content": "45% Alc./Vol.",
+  "net_contents": "750 mL",
+  "bottler_producer": "Bottled by Example Spirits Co., Bethlehem, PA",
+  "country_of_origin": "United States",
+  "government_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+  "demo_note": "Use a label image where the warning text is truncated, low-contrast, or missing to trigger review."
+}

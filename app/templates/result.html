@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="result-head">
+    <h2>Analysis Result</h2>
+    <span class="badge badge-{{ analysis.overall_status.value }}">{{ analysis.overall_status.value }}</span>
+  </div>
+  <p class="help-text"><strong>Recommendation:</strong> {{ overall_recommendation }}</p>
+  <p class="help-text">Request ID: <code>{{ analysis.request_id }}</code> | Processing time: <strong>{{ analysis.timing_ms }} ms</strong></p>
+</section>
+
+<section class="card">
+  <a href="/" class="button button-secondary">Analyze Another Label</a>
+</section>
+
+<section class="card">
+  <h3>Field Comparison</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Submitted</th>
+          <th>Detected</th>
+          <th>Status</th>
+          <th>Rationale</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in field_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.submitted_value or "-" }}</td>
+          <td>{{ row.detected_value or "-" }}</td>
+          <td><span class="badge badge-{{ row.status }}">{{ row.status }}</span></td>
+          <td>{{ row.notes or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if review_reasons %}
+<section class="card">
+  <h3>Review Reasons</h3>
+  <ul>
+    {% for reason in review_reasons %}
+    <li>{{ reason }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3>Label Images</h3>
+  <div class="image-grid">
+    <div>
+      <h4>Uploaded Label</h4>
+      <img src="{{ uploaded_image_url }}" alt="Uploaded label image" class="result-image">
+    </div>
+    <div>
+      <h4>Annotated OCR Evidence</h4>
+      {% if annotated_image_url %}
+      <img src="{{ annotated_image_url }}" alt="Annotated OCR image" class="result-image">
+      {% else %}
+      <p class="help-text">No annotated image available for this run.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h3>Extracted OCR Text</h3>
+  <textarea rows="12" readonly>{{ analysis.ocr.full_text }}</textarea>
+</section>
+
+{% if ocr_errors %}
+<section class="card">
+  <h3>Processing Notes</h3>
+  <ul>
+    {% for error in ocr_errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <a href="/" class="button button-secondary">Analyze Another Label</a>
+</section>
+{% endblock %}

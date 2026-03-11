@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <h2>Developer Diagnostics</h2>
+  <p class="help-text">Developer-only runtime diagnostics for local debugging and demo readiness checks.</p>
+</section>
+
+<section class="card">
+  <h3>OCR Status</h3>
+  <table>
+    <tbody>
+      <tr><th>State</th><td>{{ ocr_status.state }}</td></tr>
+      <tr><th>Ready</th><td>{{ ocr_status.ready }}</td></tr>
+      <tr><th>Message</th><td>{{ ocr_status.message }}</td></tr>
+      <tr><th>Error</th><td>{{ ocr_status.error or "None" }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>Readiness Snapshot</h3>
+  <table>
+    <tbody>
+      <tr><th>Overall Readiness</th><td>{{ readiness.status }}</td></tr>
+      <tr><th>OCR Loaded</th><td>{{ readiness.ocr_loaded }}</td></tr>
+      <tr><th>OCR State</th><td>{{ readiness.ocr_state }}</td></tr>
+      <tr><th>Storage Exists</th><td>{{ readiness.storage_ok }}</td></tr>
+      <tr><th>Storage Writable</th><td>{{ readiness.storage_writable }}</td></tr>
+      <tr><th>DB OK</th><td>{{ readiness.db_ok }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>Paths</h3>
+  <table>
+    <tbody>
+      <tr><th>Runtime Storage</th><td><code>{{ paths.runtime_storage }}</code></td></tr>
+      <tr><th>Sample Data</th><td><code>{{ paths.sample_data }}</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>Config Summary</h3>
+  <table>
+    <tbody>
+      {% for key, value in config_summary.items() %}
+      <tr>
+        <th>{{ key }}</th>
+        <td>{{ value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
