@@ -1,0 +1,32 @@
+{
+  "case_id": "sv_002_rotation_perspective",
+  "category": "synthetic_variants",
+  "description": "Synthetic perspective and rotation distortion case for OCR/layout resilience checks.",
+  "tags": ["synthetic", "rotation", "perspective", "layout"],
+  "image_filename": "label.jpg",
+  "expected_overall_status": "review",
+  "expected_field_results": {
+    "brand_name": "review",
+    "class_type": "review",
+    "alcohol_content": "review",
+    "net_contents": "review",
+    "bottler_producer": "review",
+    "country_of_origin": "review",
+    "government_warning": "review"
+  },
+  "application_data": {
+    "brand_name": "North Range",
+    "class_type": "Vodka",
+    "alcohol_content": "40% Alc/Vol",
+    "net_contents": "1 L",
+    "bottler_producer": "North Range Spirits, Denver, CO",
+    "country_of_origin": "United States",
+    "government_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."
+  },
+  "input_hint": {
+    "recommended_mode": "batch_label_only",
+    "batch_group": "ocr_robustness",
+    "notes": "Good for batch runs validating conservative fallback behavior."
+  },
+  "reviewer_notes": "Expected to require human review because layout distortion may reduce extraction quality."
+}

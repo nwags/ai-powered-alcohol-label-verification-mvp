@@ -21,7 +21,11 @@ The following endpoints must exist:
 GET /healthz  
 GET /readyz
 
-Both must return HTTP 200.
+Expected readiness behavior:
+
+- `GET /healthz` returns HTTP 200 for basic liveness.
+- `GET /readyz` returns HTTP 200 when dependencies are ready.
+- `GET /readyz` returns HTTP 503 when dependencies are not ready.
 
 ---
 

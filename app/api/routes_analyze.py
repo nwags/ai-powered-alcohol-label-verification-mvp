@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 
 from app.config import get_settings
 from app.dependencies import get_ocr_service
-from app.domain.enums import FieldStatus, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus
 from app.domain.models import (
     AnalyzeResponse,
     ApplicationData,
@@ -16,7 +16,7 @@ from app.domain.models import (
     OCRSmokeResponse,
     ParsedFields,
 )
-from app.services.matching_service import build_field_results
+from app.services.matching_service import build_field_results, coerce_label_type
 from app.services.parser_service import parse_ocr_text
 
 if TYPE_CHECKING:
@@ -31,6 +31,7 @@ ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 async def analyze(
     image: UploadFile = File(...),
     application_json: str = Form(...),
+    label_type: str = Form(default=LabelType.UNKNOWN.value),
     ocr_service: "OCRService" = Depends(get_ocr_service),
 ) -> AnalyzeResponse:
     started = time.perf_counter()
@@ -68,10 +69,16 @@ async def analyze(
             },
         )
 
+    resolved_label_type = coerce_label_type(label_type)
     ocr, ocr_errors = ocr_service.run_ocr_bytes(image_bytes, source_label=image.filename or "upload")
     try:
         parsed = parse_ocr_text(ocr)
-        field_results, overall_status, review_reasons = build_field_results(application, parsed)
+        field_results, overall_status, review_reasons = build_field_results(
+            application,
+            parsed,
+            label_type=resolved_label_type,
+            evaluation_mode="compare",
+        )
     except Exception as exc:  # pragma: no cover - defensive path
         ocr_errors.append(f"analysis_failed: {exc.__class__.__name__}")
         parsed = ParsedFields()

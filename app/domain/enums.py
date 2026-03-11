@@ -23,3 +23,9 @@ class OverallStatus(str, Enum):
     NORMALIZED_MATCH = "normalized_match"
     MISMATCH = "mismatch"
     REVIEW = "review"
+
+
+class LabelType(str, Enum):
+    UNKNOWN = "unknown"
+    BRAND_LABEL = "brand_label"
+    OTHER_LABEL = "other_label"

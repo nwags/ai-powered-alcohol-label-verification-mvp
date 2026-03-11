@@ -8,7 +8,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.domain.enums import FieldStatus, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus
 from app.domain.models import ApplicationData, BatchResponse, BatchResult, BatchSummary
 from app.services.matching_service import build_field_results
 from app.services.parser_service import parse_ocr_text
@@ -40,6 +40,7 @@ class BatchService:
         batch_filename: str,
         images_archive_bytes: bytes | None,
         ocr_service: "OCRService",
+        label_type: LabelType = LabelType.UNKNOWN,
     ) -> BatchResponse:
         records = _parse_batch_records(batch_file_bytes, batch_filename)
         if len(records) > self.max_records:
@@ -52,7 +53,46 @@ class BatchService:
         errors: list[str] = []
 
         for index, record in enumerate(records, start=1):
-            result = self._analyze_record(record=record, row_index=index, images_by_name=images_by_name, ocr_service=ocr_service)
+            result = self._analyze_record(
+                record=record,
+                row_index=index,
+                images_by_name=images_by_name,
+                ocr_service=ocr_service,
+                label_type=label_type,
+                evaluation_mode="compare",
+            )
+            results.append(result)
+            if result.main_reason and result.overall_status.value == "review" and result.main_reason.startswith("Image"):
+                errors.append(f"{result.record_id}: {result.main_reason}")
+
+        summary = _summarize(results)
+        artifacts = self._write_summary_artifacts(batch_id=batch_id, results=results, summary=summary)
+        return BatchResponse(batch_id=batch_id, summary=summary, results=results, artifacts=artifacts, errors=errors)
+
+    def analyze_label_only(
+        self,
+        images_archive_bytes: bytes,
+        ocr_service: "OCRService",
+        label_type: LabelType = LabelType.UNKNOWN,
+    ) -> BatchResponse:
+        images_by_name = _extract_images_from_zip(images_archive_bytes, max_images=self.max_images)
+        if not images_by_name:
+            raise ValueError("Image ZIP archive is empty.")
+
+        records = _build_label_only_records(images_by_name)
+        batch_id = f"batch-{uuid.uuid4().hex[:12]}"
+        results: list[BatchResult] = []
+        errors: list[str] = []
+
+        for index, record in enumerate(records, start=1):
+            result = self._analyze_record(
+                record=record,
+                row_index=index,
+                images_by_name=images_by_name,
+                ocr_service=ocr_service,
+                label_type=label_type,
+                evaluation_mode="label_only",
+            )
             results.append(result)
             if result.main_reason and result.overall_status.value == "review" and result.main_reason.startswith("Image"):
                 errors.append(f"{result.record_id}: {result.main_reason}")
@@ -67,6 +107,8 @@ class BatchService:
         row_index: int,
         images_by_name: dict[str, bytes],
         ocr_service: "OCRService",
+        label_type: LabelType,
+        evaluation_mode: str,
     ) -> BatchResult:
         started = time.perf_counter()
         record_id = str(record.get("record_id") or f"row-{row_index:03d}")
@@ -95,7 +137,12 @@ class BatchService:
         application = ApplicationData.model_validate(record)
         ocr, ocr_errors = ocr_service.run_ocr_bytes(image_bytes, source_label=image_filename)
         parsed = parse_ocr_text(ocr)
-        field_results, overall_status, review_reasons = build_field_results(application, parsed)
+        field_results, overall_status, review_reasons = build_field_results(
+            application,
+            parsed,
+            label_type=label_type,
+            evaluation_mode=evaluation_mode,
+        )
 
         main_reason = _pick_main_reason(field_results=field_results, review_reasons=review_reasons, ocr_errors=ocr_errors)
         return BatchResult(
@@ -192,6 +239,18 @@ def _extract_image_filename(record: dict[str, Any]) -> str | None:
         if value and isinstance(value, str):
             return Path(value).name
     return None
+
+
+def _build_label_only_records(images_by_name: dict[str, bytes]) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for index, image_filename in enumerate(sorted(images_by_name.keys()), start=1):
+        records.append(
+            {
+                "record_id": f"img-{index:03d}",
+                "image_filename": image_filename,
+            }
+        )
+    return records
 
 
 def _pick_main_reason(

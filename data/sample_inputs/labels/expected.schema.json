@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/alcohol-label/expected.schema.json",
+  "title": "Alcohol Label Expected Sidecar",
+  "type": "object",
+  "required": [
+    "case_id",
+    "category",
+    "description",
+    "expected_overall_status",
+    "expected_field_results",
+    "input_hint"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "real_reviewed",
+        "synthetic_variants",
+        "ai_adversarial"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "image_filename": {
+      "type": "string",
+      "default": "label.jpg"
+    },
+    "expected_overall_status": {
+      "type": "string",
+      "enum": [
+        "match",
+        "normalized_match",
+        "mismatch",
+        "review"
+      ]
+    },
+    "expected_field_results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "brand_name",
+        "class_type",
+        "alcohol_content",
+        "net_contents",
+        "bottler_producer",
+        "country_of_origin",
+        "government_warning"
+      ],
+      "properties": {
+        "brand_name": { "$ref": "#/$defs/fieldStatus" },
+        "class_type": { "$ref": "#/$defs/fieldStatus" },
+        "alcohol_content": { "$ref": "#/$defs/fieldStatus" },
+        "net_contents": { "$ref": "#/$defs/fieldStatus" },
+        "bottler_producer": { "$ref": "#/$defs/fieldStatus" },
+        "country_of_origin": { "$ref": "#/$defs/fieldStatus" },
+        "government_warning": { "$ref": "#/$defs/fieldStatus" }
+      }
+    },
+    "application_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brand_name": { "type": ["string", "null"] },
+        "class_type": { "type": ["string", "null"] },
+        "alcohol_content": { "type": ["string", "null"] },
+        "net_contents": { "type": ["string", "null"] },
+        "bottler_producer": { "type": ["string", "null"] },
+        "country_of_origin": { "type": ["string", "null"] },
+        "government_warning": { "type": ["string", "null"] }
+      }
+    },
+    "input_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recommended_mode"
+      ],
+      "properties": {
+        "recommended_mode": {
+          "type": "string",
+          "enum": [
+            "label_only",
+            "compare_application",
+            "batch_label_only",
+            "batch_compare_application"
+          ]
+        },
+        "batch_group": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "reviewer_notes": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "fieldStatus": {
+      "type": "string",
+      "enum": [
+        "match",
+        "normalized_match",
+        "mismatch",
+        "review"
+      ]
+    }
+  }
+}

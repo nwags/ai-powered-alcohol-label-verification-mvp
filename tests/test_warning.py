@@ -24,3 +24,29 @@ def test_warning_statement_prefers_review_when_prefix_uncertain():
     )
     assert result.status == FieldStatus.REVIEW
     assert reasons
+
+
+def test_warning_statement_label_only_prefers_review_for_partial_text():
+    result, reasons = compare_warning_statement(
+        submitted_value=None,
+        detected_value="GOVERNMENT WARNING: pregnant women should not drink",
+        detected=True,
+        has_uppercase_prefix=True,
+        detection_confidence=0.72,
+        evaluation_mode="label_only",
+    )
+    assert result.status == FieldStatus.REVIEW
+    assert reasons
+
+
+def test_warning_statement_label_only_can_return_non_review_when_strong():
+    result, reasons = compare_warning_statement(
+        submitted_value=None,
+        detected_value=CANONICAL_WARNING_TEXT,
+        detected=True,
+        has_uppercase_prefix=True,
+        detection_confidence=0.95,
+        evaluation_mode="label_only",
+    )
+    assert result.status in {FieldStatus.MATCH, FieldStatus.NORMALIZED_MATCH}
+    assert reasons == []

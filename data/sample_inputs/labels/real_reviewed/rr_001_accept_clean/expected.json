@@ -1,0 +1,32 @@
+{
+  "case_id": "rr_001_accept_clean",
+  "category": "real_reviewed",
+  "description": "Clean, legible label expected to pass core field checks with complete mandatory warning.",
+  "tags": ["accepted", "clean", "baseline"],
+  "image_filename": "label.jpg",
+  "expected_overall_status": "match",
+  "expected_field_results": {
+    "brand_name": "match",
+    "class_type": "match",
+    "alcohol_content": "match",
+    "net_contents": "match",
+    "bottler_producer": "match",
+    "country_of_origin": "match",
+    "government_warning": "match"
+  },
+  "application_data": {
+    "brand_name": "Summit Creek",
+    "class_type": "Straight Bourbon Whiskey",
+    "alcohol_content": "45% Alc/Vol",
+    "net_contents": "750 mL",
+    "bottler_producer": "Summit Creek Distilling Co., Louisville, KY",
+    "country_of_origin": "United States",
+    "government_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."
+  },
+  "input_hint": {
+    "recommended_mode": "compare_application",
+    "batch_group": "baseline_pass",
+    "notes": "Use as first smoke-test case for both single and batch flows."
+  },
+  "reviewer_notes": "Expected to be a straightforward acceptance reference."
+}

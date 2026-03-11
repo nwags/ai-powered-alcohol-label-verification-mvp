@@ -50,13 +50,25 @@ def deskew_hook(image: np.ndarray) -> np.ndarray:
     return image
 
 
+def ensure_bgr(image: np.ndarray) -> np.ndarray:
+    if image.ndim == 2:
+        converted = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.ndim == 3 and image.shape[2] == 1:
+        converted = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.ndim == 3 and image.shape[2] == 4:
+        converted = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    else:
+        converted = image
+    return np.ascontiguousarray(converted)
+
+
 def build_ocr_variants(
     image: np.ndarray,
     max_dimension: int = 2200,
     enable_deskew: bool = False,
     max_variants: int = 3,
 ) -> list[ImageVariant]:
-    prepared = resize_if_too_large(image, max_dimension=max_dimension)
+    prepared = ensure_bgr(resize_if_too_large(image, max_dimension=max_dimension))
     if enable_deskew:
         prepared = deskew_hook(prepared)
 
@@ -66,7 +78,7 @@ def build_ocr_variants(
     variants: list[ImageVariant] = [ImageVariant(name="color_resized", image=prepared)]
 
     if max_variants >= 2:
-        variants.append(ImageVariant(name="gray_clean", image=cleaned))
+        variants.append(ImageVariant(name="gray_clean_bgr", image=ensure_bgr(cleaned)))
 
     if max_variants >= 3:
         threshold = cv2.adaptiveThreshold(
@@ -77,6 +89,6 @@ def build_ocr_variants(
             31,
             12,
         )
-        variants.append(ImageVariant(name="gray_threshold", image=threshold))
+        variants.append(ImageVariant(name="gray_threshold_bgr", image=ensure_bgr(threshold)))
 
     return variants[:max(1, min(max_variants, 3))]

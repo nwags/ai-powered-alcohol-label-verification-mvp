@@ -35,3 +35,23 @@ def test_analyze_rejects_unsupported_media_type(client):
 
     assert response.status_code == 415
     assert response.json()["error"]["code"] == "invalid_image"
+
+
+def test_analyze_accepts_label_type_hint(client):
+    payload = {
+        "brand_name": "Stone's Throw Whiskey",
+        "class_type": "Whiskey",
+        "alcohol_content": "45% Alc./Vol.",
+        "net_contents": "750 mL",
+        "bottler_producer": "Bottled by Example Spirits Co.",
+        "country_of_origin": "United States",
+        "government_warning": "GOVERNMENT WARNING: sample",
+    }
+    files = {"image": ("label.jpg", build_test_image_bytes(), "image/jpeg")}
+    data = {"application_json": json.dumps(payload), "label_type": "brand_label"}
+
+    response = client.post("/api/v1/analyze", files=files, data=data)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["overall_status"] in {"match", "normalized_match", "mismatch", "review"}

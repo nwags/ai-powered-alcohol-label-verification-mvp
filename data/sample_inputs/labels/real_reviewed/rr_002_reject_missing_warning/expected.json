@@ -1,0 +1,32 @@
+{
+  "case_id": "rr_002_reject_missing_warning",
+  "category": "real_reviewed",
+  "description": "Label appears otherwise valid but omits or truncates mandatory government warning.",
+  "tags": ["rejected", "warning", "compliance"],
+  "image_filename": "label.jpg",
+  "expected_overall_status": "mismatch",
+  "expected_field_results": {
+    "brand_name": "match",
+    "class_type": "match",
+    "alcohol_content": "match",
+    "net_contents": "match",
+    "bottler_producer": "match",
+    "country_of_origin": "match",
+    "government_warning": "mismatch"
+  },
+  "application_data": {
+    "brand_name": "Red Harbor",
+    "class_type": "Rum",
+    "alcohol_content": "40% Alc/Vol",
+    "net_contents": "750 mL",
+    "bottler_producer": "Red Harbor Spirits, Miami, FL",
+    "country_of_origin": "United States",
+    "government_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."
+  },
+  "input_hint": {
+    "recommended_mode": "compare_application",
+    "batch_group": "warning_failures",
+    "notes": "Primary negative control for warning verification behavior."
+  },
+  "reviewer_notes": "Should route to reviewer attention due to mandatory warning issue."
+}

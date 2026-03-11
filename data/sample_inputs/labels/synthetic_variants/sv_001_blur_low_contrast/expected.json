@@ -1,0 +1,32 @@
+{
+  "case_id": "sv_001_blur_low_contrast",
+  "category": "synthetic_variants",
+  "description": "Synthetic blur and low-contrast variant to test OCR degradation handling.",
+  "tags": ["synthetic", "blur", "low_contrast", "ocr_stress"],
+  "image_filename": "label.jpg",
+  "expected_overall_status": "review",
+  "expected_field_results": {
+    "brand_name": "review",
+    "class_type": "review",
+    "alcohol_content": "review",
+    "net_contents": "review",
+    "bottler_producer": "review",
+    "country_of_origin": "review",
+    "government_warning": "review"
+  },
+  "application_data": {
+    "brand_name": "Summit Creek",
+    "class_type": "Straight Bourbon Whiskey",
+    "alcohol_content": "45% Alc/Vol",
+    "net_contents": "750 mL",
+    "bottler_producer": "Summit Creek Distilling Co., Louisville, KY",
+    "country_of_origin": "United States",
+    "government_warning": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."
+  },
+  "input_hint": {
+    "recommended_mode": "label_only",
+    "batch_group": "ocr_robustness",
+    "notes": "Expected conservative review output due to readability degradation."
+  },
+  "reviewer_notes": "Use to ensure system does not over-claim match under low-confidence OCR."
+}

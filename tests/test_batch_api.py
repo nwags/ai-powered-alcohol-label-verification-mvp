@@ -42,6 +42,7 @@ def test_batch_analyze_csv_with_images_archive(client):
 
     response = client.post(
         "/api/v1/batch/analyze",
+        data={"label_type": "other_label"},
         files={
             "batch_file": ("batch.csv", csv_bytes, "text/csv"),
             "images_archive": ("images.zip", zip_bytes, "application/zip"),

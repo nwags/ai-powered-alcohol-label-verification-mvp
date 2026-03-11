@@ -39,6 +39,20 @@
       </p>
     </fieldset>
 
+    <fieldset class="mode-selector">
+      <legend>Label Type Hint</legend>
+      {% for value, label in label_type_options %}
+      <label class="mode-option {% if form_values.label_type == value %}mode-option-active{% endif %}">
+        <input type="radio" name="label_type" value="{{ value }}" {% if form_values.label_type == value %}checked{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+      <p class="field-note">
+        Brand Label emphasizes brand/class/alcohol checks. Other Label emphasizes warning, bottler/producer, net contents, and country of origin.
+        Unknown keeps full-scan behavior.
+      </p>
+    </fieldset>
+
     <div class="form-row">
       <label for="image">Label Image</label>
       <input id="image" name="image" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" required>

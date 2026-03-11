@@ -24,12 +24,19 @@ class Settings(BaseSettings):
     enable_diagnostics_ui: bool = False
     enable_ocr: bool = True
     ocr_use_gpu: bool = False
+    ocr_require_local_models: bool = True
+    ocr_model_source: str = "local"
+    ocr_model_root: Path = Path("data/models/paddleocr")
+    ocr_det_model_dir: Path | None = None
+    ocr_rec_model_dir: Path | None = None
+    ocr_cls_model_dir: Path | None = None
     ocr_max_dimension: int = 2200
     ocr_max_variants: int = 3
     ocr_enable_deskew: bool = False
 
     storage_dir: Path = Path("runtime")
     sample_data_dir: Path = Path("data")
+    coverage_dir: Path = Path("runtime/coverage")
     db_path: Path = Path("data/app.db")
     max_upload_bytes: int = 10 * 1024 * 1024
     batch_max_records: int = 200

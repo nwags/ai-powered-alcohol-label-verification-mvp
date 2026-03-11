@@ -11,7 +11,7 @@ from app.domain.models import (
 
 ALCOHOL_PERCENT_RE = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*%\s*(?:alc\.?\s*/?\s*vol\.?|alcohol by volume)?", re.IGNORECASE)
 PROOF_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*proof", re.IGNORECASE)
-ML_RE = re.compile(r"(\d{2,4}(?:\.\d+)?)\s*(ml|mL|ML|l|L)\b")
+ML_RE = re.compile(r"(\d{1,4}(?:\.\d+)?)\s*(ml|mL|ML|l|L)\b")
 COUNTRY_RE = re.compile(r"(?:product of|made in|produced in)\s+(.+)", re.IGNORECASE)
 WARNING_PREFIX_RE = re.compile(r"\bgovernment\s+warning\s*:", re.IGNORECASE)
 

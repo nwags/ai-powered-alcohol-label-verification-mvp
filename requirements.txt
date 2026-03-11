@@ -7,6 +7,7 @@ pydantic-settings
 pillow
 opencv-python-headless
 paddleocr
-paddlepaddle
+paddlepaddle==3.2.2
 pytest
+pytest-cov
 httpx

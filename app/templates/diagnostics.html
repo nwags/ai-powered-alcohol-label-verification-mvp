@@ -4,6 +4,11 @@
 <section class="card">
   <h2>Developer Diagnostics</h2>
   <p class="help-text">Developer-only runtime diagnostics for local debugging and demo readiness checks.</p>
+  <form method="post" action="/ui/diagnostics/coverage" class="form-actions">
+    <button id="coverage-generate-btn" type="submit" class="button button-primary" {% if coverage_run.state == "running" %}disabled{% endif %}>
+      <span id="coverage-generate-label">{% if coverage_run.state == "running" %}Coverage Running...{% else %}Generate Coverage{% endif %}</span>
+    </button>
+  </form>
 </section>
 
 <section class="card">
@@ -14,6 +19,10 @@
       <tr><th>Ready</th><td>{{ ocr_status.ready }}</td></tr>
       <tr><th>Message</th><td>{{ ocr_status.message }}</td></tr>
       <tr><th>Error</th><td>{{ ocr_status.error or "None" }}</td></tr>
+      <tr><th>Model Source</th><td>{{ ocr_status.model_source or "auto" }}</td></tr>
+      <tr><th>Require Local Models</th><td>{{ ocr_status.require_local_models }}</td></tr>
+      <tr><th>Local Model Assets Ready</th><td>{{ ocr_status.model_assets_ready }}</td></tr>
+      <tr><th>Missing Model Assets</th><td>{{ ocr_status.model_assets_missing|join(", ") if ocr_status.model_assets_missing else "None" }}</td></tr>
     </tbody>
   </table>
 </section>
@@ -54,5 +63,50 @@
       {% endfor %}
     </tbody>
   </table>
+</section>
+
+<section
+  class="card"
+  id="coverage-card"
+  data-coverage-state="{{ coverage_run.state }}"
+>
+  <h3>Test Coverage</h3>
+  <table>
+    <tbody>
+      <tr><th>Run State</th><td id="coverage-run-state">{{ coverage_run.state }}</td></tr>
+      <tr><th>Run Message</th><td id="coverage-run-message">{{ coverage_run.message }}</td></tr>
+      <tr><th>Exit Code</th><td id="coverage-run-exit-code">{{ coverage_run.last_exit_code if coverage_run.last_exit_code is not none else "N/A" }}</td></tr>
+    </tbody>
+  </table>
+  <table id="coverage-summary-table" {% if not coverage.available %}hidden{% endif %}>
+    <tbody>
+      <tr><th>Total Coverage</th><td><span id="coverage-total">{{ coverage.total_percent if coverage.total_percent is not none else "N/A" }}</span>%</td></tr>
+      <tr><th>Covered Lines</th><td id="coverage-covered-lines">{{ coverage.covered_lines if coverage.covered_lines is not none else "N/A" }}</td></tr>
+      <tr><th>Total Statements</th><td id="coverage-num-statements">{{ coverage.num_statements if coverage.num_statements is not none else "N/A" }}</td></tr>
+      <tr><th>Summary JSON</th><td><code>{{ coverage.summary_path }}</code></td></tr>
+      <tr>
+        <th>HTML Report</th>
+        <td>
+          <a id="coverage-html-link" href="{{ coverage.html_url if coverage.html_url else '#' }}" target="_blank" rel="noopener" {% if not coverage.html_url %}hidden{% endif %}>Open Coverage HTML Report</a>
+          <span id="coverage-html-missing" {% if coverage.html_url %}hidden{% endif %}>Not generated yet</span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="help-text" id="coverage-empty-message" {% if coverage.available %}hidden{% endif %}>
+    Coverage is not available yet. Generate it with:
+    <code>make coverage</code>
+  </p>
+  <p class="field-note">Expected summary file: <code>{{ coverage.summary_path }}</code></p>
+</section>
+
+<section class="card">
+  <h3>Recent Logs</h3>
+  {% if recent_logs %}
+  <pre style="max-height: 360px; overflow: auto;">{% for line in recent_logs %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p class="help-text">No logs captured yet.</p>
+  {% endif %}
 </section>
 {% endblock %}

@@ -4,3 +4,5 @@ __pycache__/
 .env
 *.pyc
 data/sample_outputs/*
+handoff.md
+snapshot_v*

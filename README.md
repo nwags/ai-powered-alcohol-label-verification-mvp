@@ -79,6 +79,21 @@ Optional env overrides:
 - `BASE_URL=http://localhost:8000`
 - `ENABLE_DIAGNOSTICS_UI=true` (enables developer-only `/ui/diagnostics`)
 
+## Coverage Workflow (Developer)
+
+Generate latest coverage artifacts without running tests on each diagnostics request:
+
+```bash
+make coverage
+```
+
+This writes:
+- terminal coverage summary in command output
+- HTML report at `runtime/coverage/html/index.html`
+- JSON summary at `runtime/coverage/coverage.json`
+
+When diagnostics UI is enabled, `/ui/diagnostics` shows the latest known coverage summary if the JSON artifact exists.
+
 ## UI Demo Flow
 
 1. Open `http://localhost:8000`.
@@ -88,6 +103,10 @@ Optional env overrides:
 5. Click **Analyze Label**.
 6. Review the result page:
    uploaded image, OCR text, side-by-side field table, status badges, timing, and overall recommendation.
+
+Batch modes on `/ui/batch`:
+- **Batch Label-Only Review** (default): upload an images ZIP to screen many labels without application records.
+- **Batch Compare to Application Data**: upload CSV/JSON plus matching images ZIP for side-by-side validation.
 
 ## Demo Assets
 

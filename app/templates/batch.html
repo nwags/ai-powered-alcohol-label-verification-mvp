@@ -3,27 +3,73 @@
 {% block content %}
 <section class="card">
   <h2>Batch Label Review</h2>
-  <p class="help-text">Upload a CSV or JSON file of application records and a ZIP of label images. Processing runs in this request for MVP demos.</p>
+  <p class="help-text">Run multi-label review in either Label-Only mode (default) or Compare mode.</p>
 
   {% if error_message %}
   <div class="alert alert-error">{{ error_message }}</div>
   {% endif %}
 
   <form method="post" action="/ui/batch" enctype="multipart/form-data" class="review-form">
-    <div class="form-row">
-      <label for="batch_file">Batch Data File (CSV or JSON)</label>
-      <input id="batch_file" name="batch_file" type="file" accept=".csv,.json" required>
-      <p class="field-note">Include `record_id` and `image_filename` columns/fields plus application fields.</p>
+    <fieldset class="mode-selector" id="batch-mode-selector">
+      <legend>Batch Review Mode</legend>
+      <label class="mode-option {% if batch_review_mode == 'batch_label_only' %}mode-option-active{% endif %}">
+        <input type="radio" name="batch_review_mode" value="batch_label_only" {% if batch_review_mode == 'batch_label_only' %}checked{% endif %}>
+        <span>Batch Label-Only Review</span>
+      </label>
+      <label class="mode-option {% if batch_review_mode == 'batch_compare_application' %}mode-option-active{% endif %}">
+        <input type="radio" name="batch_review_mode" value="batch_compare_application" {% if batch_review_mode == 'batch_compare_application' %}checked{% endif %}>
+        <span>Batch Compare to Application Data</span>
+      </label>
+    </fieldset>
+
+    <fieldset class="mode-selector">
+      <legend>Batch Label Type Hint</legend>
+      <label class="mode-option {% if label_type == 'unknown' %}mode-option-active{% endif %}">
+        <input type="radio" name="label_type" value="unknown" {% if label_type == 'unknown' %}checked{% endif %}>
+        <span>Unknown</span>
+      </label>
+      <label class="mode-option {% if label_type == 'brand_label' %}mode-option-active{% endif %}">
+        <input type="radio" name="label_type" value="brand_label" {% if label_type == 'brand_label' %}checked{% endif %}>
+        <span>Brand Label</span>
+      </label>
+      <label class="mode-option {% if label_type == 'other_label' %}mode-option-active{% endif %}">
+        <input type="radio" name="label_type" value="other_label" {% if label_type == 'other_label' %}checked{% endif %}>
+        <span>Other Label</span>
+      </label>
+      <p class="field-note">Applied as a batch-level default for all records in this run.</p>
+    </fieldset>
+
+    <div id="batch-help-label-only" class="help-box {% if batch_review_mode == 'batch_compare_application' %}compare-inputs-hidden{% endif %}">
+      <p class="help-text">Label-Only mode screens many labels quickly without submitted application records.</p>
+      <p class="field-note">Upload only an images ZIP. The system will create one batch record per image filename.</p>
     </div>
+
+    <div id="batch-help-compare" class="help-box {% if batch_review_mode != 'batch_compare_application' %}compare-inputs-hidden{% endif %}">
+      <p class="help-text">Compare mode validates OCR results against submitted application records.</p>
+      <p class="field-note">Provide CSV/JSON with `record_id` + `image_filename` (plus application fields), and a matching images ZIP.</p>
+    </div>
+
+    <div id="batch-compare-inputs" class="{% if batch_review_mode != 'batch_compare_application' %}compare-inputs-hidden{% endif %}">
+      <div class="form-row">
+        <label for="batch_file">Batch Data File (CSV or JSON)</label>
+        <input id="batch_file" name="batch_file" type="file" accept=".csv,.json" {% if batch_review_mode == 'batch_compare_application' %}required{% endif %}>
+        <p class="field-note">Include `record_id` and `image_filename` columns/fields plus application fields.</p>
+      </div>
+    </div>
+
     <div class="form-row">
       <label for="images_archive">Images ZIP</label>
-      <input id="images_archive" name="images_archive" type="file" accept=".zip">
-      <p class="field-note">ZIP should contain image files referenced by `image_filename`.</p>
+      <input id="images_archive" name="images_archive" type="file" accept=".zip" {% if batch_review_mode == 'batch_label_only' %}required{% endif %}>
+      <p class="field-note">ZIP should contain label images. In compare mode, filenames must match `image_filename` values.</p>
     </div>
     <div class="form-actions">
       <button type="submit" class="button button-primary">Run Batch Analysis</button>
     </div>
   </form>
+</section>
+
+<section class="card">
+  <a href="/" class="button button-secondary">Single Label Review</a>
 </section>
 
 {% if batch_response %}

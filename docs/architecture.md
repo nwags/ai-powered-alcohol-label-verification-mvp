@@ -140,6 +140,8 @@ Examples:
 matching_service.py
 
 Compares parsed label values with application data.
+Applies optional `label_type` hint routing to prioritize
+brand-focused vs other-label-focused field aggregation for MVP.
 
 Returns:
 

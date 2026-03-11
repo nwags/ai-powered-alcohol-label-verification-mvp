@@ -26,11 +26,15 @@ UI routes:
 - `POST /ui/analyze`
 - `GET /ui/batch`
 - `POST /ui/batch`
+- `GET /ui/diagnostics` (developer-only, optional)
+- `POST /ui/diagnostics/coverage` (developer-only, optional)
+- `GET /ui/diagnostics/coverage/status` (developer-only, optional)
 
 JSON API routes:
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /api/v1/ocr/status`
 - `POST /api/v1/analyze`
 - `POST /api/v1/batch/analyze`
 
@@ -127,7 +131,9 @@ Request content type:
 Fields:
 
 - `image` required
-- `application_json` required
+- `review_mode` optional (`label_only` default, `compare_application` alternate)
+- `label_type` optional (`unknown` default, `brand_label` or `other_label`)
+- `application_json` optional (used in `compare_application` mode)
 
 Response:
 
@@ -135,6 +141,15 @@ Response:
 - HTML result page
 
 This route should reuse the same internal service pipeline as `POST /api/v1/analyze`.
+
+UI behavior:
+
+- `label_only` mode is the default and hides application-data entry fields.
+- `compare_application` mode reveals application-data entry fields for side-by-side checks.
+- `label_type` is a lightweight hint for emphasis:
+  - `brand_label`: prioritize brand/class/alcohol for overall aggregation.
+  - `other_label`: prioritize warning/bottler/net/country for overall aggregation.
+  - `unknown`: keep full-field aggregation.
 
 ---
 
@@ -165,8 +180,10 @@ Request content type:
 
 Fields:
 
-- `batch_file` required
-- `images_archive` optional
+- `batch_review_mode` optional (`batch_label_only` default, `batch_compare_application` alternate)
+- `label_type` optional (`unknown` default, batch-level hint for all records)
+- `images_archive` required in label-only mode
+- `batch_file` required in compare mode
 
 Response:
 
@@ -174,6 +191,65 @@ Response:
 - HTML batch result page
 
 This route may be omitted temporarily if batch mode is deferred.
+
+UI behavior:
+
+- `batch_label_only` mode is the default and focuses on ZIP-only label screening.
+- `batch_compare_application` mode preserves CSV/JSON + image ZIP comparison workflow.
+
+---
+
+## GET /ui/diagnostics
+
+Purpose:
+
+Render developer diagnostics for local/demo debugging.
+
+Response:
+
+- HTTP 200 when diagnostics UI is enabled
+- HTTP 404 when diagnostics UI is disabled
+
+Notes:
+
+- This route must be gated behind `ENABLE_DIAGNOSTICS_UI=true`.
+- This route is developer-oriented and should not be part of normal reviewer workflow.
+- This route may display latest test coverage summary from local pytest-cov artifacts when available.
+- This route must not execute full test suites on page load.
+
+## POST /ui/diagnostics/coverage
+
+Purpose:
+
+Trigger manual coverage generation from the diagnostics UI.
+
+Response:
+
+- HTTP 303 redirect to `/ui/diagnostics`
+- HTTP 404 when diagnostics UI is disabled
+
+Notes:
+
+- Coverage generation must only run when this action is requested.
+- Coverage generation state should be surfaced in `/ui/diagnostics` (idle/running/success/failure).
+
+## GET /ui/diagnostics/coverage/status
+
+Purpose:
+
+Return machine-readable coverage run state for diagnostics UI polling.
+
+Response:
+
+- HTTP 200 with JSON payload including:
+  - `coverage_run` (`state`, `message`, `last_exit_code`)
+  - `coverage` summary snapshot (`available`, `total_percent`, `covered_lines`, `num_statements`, `html_url`)
+- HTTP 404 when diagnostics UI is disabled
+
+Notes:
+
+- This endpoint must be gated behind `ENABLE_DIAGNOSTICS_UI=true`.
+- This endpoint must not trigger coverage generation.
 
 ---
 
@@ -193,6 +269,10 @@ Required parts:
 
 - `image`
 - `application_json`
+
+Optional parts:
+
+- `label_type` (`unknown` default; allowed values: `unknown`, `brand_label`, `other_label`)
 
 Success response:
 
@@ -223,6 +303,36 @@ Error responses:
 
 ---
 
+## GET /api/v1/ocr/status
+
+Purpose:
+
+Expose current OCR engine lifecycle state for UI feedback.
+
+Response:
+
+- HTTP 200 with OCR status payload
+
+Example:
+
+```json
+{
+  "state": "warming",
+  "ready": false,
+  "message": "OCR warmup is in progress.",
+  "error": null
+}
+```
+
+Allowed `state` values:
+
+- `cold`
+- `warming`
+- `ready`
+- `failed`
+
+---
+
 ## POST /api/v1/batch/analyze
 
 Purpose:
@@ -232,6 +342,10 @@ Analyze multiple label/application pairs in one request.
 Request content type:
 
 `multipart/form-data`
+
+Optional fields:
+
+- `label_type` (`unknown` default; batch-level hint applied to all records)
 
 Required parts:
 
@@ -345,4 +459,3 @@ Recommended behavior:
 # Change Control
 
 If any endpoint, method, request shape, or response shape changes, update this file and `docs/data_models.md` together.
-
