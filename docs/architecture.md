@@ -142,6 +142,8 @@ matching_service.py
 Compares parsed label values with application data.
 Applies optional `label_type` hint routing to prioritize
 brand-focused vs other-label-focused field aggregation for MVP.
+Applies optional `product_profile` hint/inference to use
+profile-aware normalization and evaluation heuristics.
 
 Returns:
 
@@ -161,6 +163,33 @@ Validates the government warning statement.
 visualization_service.py
 
 Highlights bounding boxes where fields were detected.
+
+---
+
+inference_service.py
+
+Performs explainable, heuristic inference for:
+
+- product profile (`distilled_spirits`, `malt_beverage`, `wine`, `unknown`)
+- label type (`brand_label`, `other_label`, `unknown`)
+
+Inference metadata is stored in analysis artifacts for UI transparency.
+
+---
+
+rule_registry.py
+
+Provides lightweight rule metadata registry and traceability helpers.
+Evaluators attach rule IDs, and artifacts keep machine-readable rule traces.
+
+---
+
+result_explanation_service.py
+
+Builds reviewer-facing overall explanations from existing analysis outputs,
+inference metadata, and rule traces.
+This is a UI explanation layer (not a full rule executor) and intentionally
+serves as a bridge for future rules-engine expansion.
 
 ---
 

@@ -4,6 +4,7 @@
 <section class="card">
   <h2>Batch Label Review</h2>
   <p class="help-text">Run multi-label review in either Label-Only mode (default) or Compare mode.</p>
+  <p class="field-note">Batch runs are synchronous in this MVP and can take time on CPU for larger uploads.</p>
 
   {% if error_message %}
   <div class="alert alert-error">{{ error_message }}</div>
@@ -12,31 +13,34 @@
   <form method="post" action="/ui/batch" enctype="multipart/form-data" class="review-form">
     <fieldset class="mode-selector" id="batch-mode-selector">
       <legend>Batch Review Mode</legend>
-      <label class="mode-option {% if batch_review_mode == 'batch_label_only' %}mode-option-active{% endif %}">
-        <input type="radio" name="batch_review_mode" value="batch_label_only" {% if batch_review_mode == 'batch_label_only' %}checked{% endif %}>
-        <span>Batch Label-Only Review</span>
+      {% for value, label in batch_review_mode_options %}
+      <label class="mode-option {% if batch_review_mode == value %}mode-option-active{% endif %}">
+        <input type="radio" name="batch_review_mode" value="{{ value }}" {% if batch_review_mode == value %}checked{% endif %}>
+        <span>{{ label }}</span>
       </label>
-      <label class="mode-option {% if batch_review_mode == 'batch_compare_application' %}mode-option-active{% endif %}">
-        <input type="radio" name="batch_review_mode" value="batch_compare_application" {% if batch_review_mode == 'batch_compare_application' %}checked{% endif %}>
-        <span>Batch Compare to Application Data</span>
-      </label>
+      {% endfor %}
     </fieldset>
 
     <fieldset class="mode-selector">
       <legend>Batch Label Type Hint</legend>
-      <label class="mode-option {% if label_type == 'unknown' %}mode-option-active{% endif %}">
-        <input type="radio" name="label_type" value="unknown" {% if label_type == 'unknown' %}checked{% endif %}>
-        <span>Unknown</span>
+      {% for value, label in label_type_options %}
+      <label class="mode-option {% if label_type == value %}mode-option-active{% endif %}">
+        <input type="radio" name="label_type" value="{{ value }}" {% if label_type == value %}checked{% endif %}>
+        <span>{{ label }}</span>
       </label>
-      <label class="mode-option {% if label_type == 'brand_label' %}mode-option-active{% endif %}">
-        <input type="radio" name="label_type" value="brand_label" {% if label_type == 'brand_label' %}checked{% endif %}>
-        <span>Brand Label</span>
-      </label>
-      <label class="mode-option {% if label_type == 'other_label' %}mode-option-active{% endif %}">
-        <input type="radio" name="label_type" value="other_label" {% if label_type == 'other_label' %}checked{% endif %}>
-        <span>Other Label</span>
-      </label>
+      {% endfor %}
       <p class="field-note">Applied as a batch-level default for all records in this run.</p>
+    </fieldset>
+
+    <fieldset class="mode-selector">
+      <legend>Batch Product Profile Hint</legend>
+      {% for value, label in product_profile_options %}
+      <label class="mode-option {% if product_profile == value %}mode-option-active{% endif %}">
+        <input type="radio" name="product_profile" value="{{ value }}" {% if product_profile == value %}checked{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+      <p class="field-note">Applied as a batch-level profile hint for all records in this run.</p>
     </fieldset>
 
     <div id="batch-help-label-only" class="help-box {% if batch_review_mode == 'batch_compare_application' %}compare-inputs-hidden{% endif %}">
@@ -76,7 +80,15 @@
 <section class="card">
   <h3>Batch Summary</h3>
   <p class="help-text">Batch ID: <code>{{ batch_response.batch_id }}</code></p>
+  {% if batch_elapsed_ms is not none %}
+  <p class="help-text"><strong>Mode:</strong> {{ batch_mode_used }} | <strong>Elapsed:</strong> {{ batch_elapsed_ms }} ms | <strong>Processed:</strong> {{ processed_count }}</p>
+  {% endif %}
   <div class="two-col">
+    {% if batch_mode_used == 'batch_label_only' and batch_display_summary %}
+    <p><strong>Pass:</strong> {{ batch_display_summary.pass }}</p>
+    <p><strong>Review:</strong> {{ batch_display_summary.review }}</p>
+    <p><strong>Fail:</strong> {{ batch_display_summary.fail }}</p>
+    {% endif %}
     <p><strong>Total:</strong> {{ batch_response.summary.total }}</p>
     <p><strong>Match:</strong> {{ batch_response.summary.match }}</p>
     <p><strong>Normalized:</strong> {{ batch_response.summary.normalized_match }}</p>
@@ -110,19 +122,25 @@
     <table>
       <thead>
         <tr>
+          <th>Details</th>
           <th>Record ID</th>
+          <th>Image</th>
           <th>Filename</th>
-          <th>Overall Status</th>
+          <th>Overall Result</th>
+          <th>Internal Status</th>
           <th>Main Reason</th>
           <th>Timing (ms)</th>
         </tr>
       </thead>
       <tbody>
-        {% for row in batch_response.results %}
+        {% for row in batch_display_rows %}
         <tr>
+          <td><a href="{{ row.detail_url }}">View</a></td>
           <td>{{ row.record_id }}</td>
+          <td>{% if row.image_filename %}available{% else %}-{% endif %}</td>
           <td>{{ row.image_filename or "-" }}</td>
-          <td><span class="badge badge-{{ row.overall_status.value }}">{{ row.overall_status.value }}</span></td>
+          <td><span class="badge badge-{{ row.display_status }}">{{ row.display_status }}</span></td>
+          <td><span class="badge badge-{{ row.internal_status }}">{{ row.internal_status }}</span></td>
           <td>{{ row.main_reason or "-" }}</td>
           <td>{{ row.timing_ms }}</td>
         </tr>

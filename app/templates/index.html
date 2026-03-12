@@ -26,14 +26,12 @@
   <form action="/ui/analyze" method="post" enctype="multipart/form-data" class="review-form" id="review-form">
     <fieldset class="mode-selector" id="review-mode-selector">
       <legend>Review Mode</legend>
-      <label class="mode-option {% if form_values.review_mode == 'label_only' %}mode-option-active{% endif %}">
-        <input type="radio" name="review_mode" value="label_only" {% if form_values.review_mode == 'label_only' %}checked{% endif %}>
-        <span>Label-Only Review</span>
+      {% for value, label in review_mode_options %}
+      <label class="mode-option {% if form_values.review_mode == value %}mode-option-active{% endif %}">
+        <input type="radio" name="review_mode" value="{{ value }}" {% if form_values.review_mode == value %}checked{% endif %}>
+        <span>{{ label }}</span>
       </label>
-      <label class="mode-option {% if form_values.review_mode == 'compare_application' %}mode-option-active{% endif %}">
-        <input type="radio" name="review_mode" value="compare_application" {% if form_values.review_mode == 'compare_application' %}checked{% endif %}>
-        <span>Compare to Application Data</span>
-      </label>
+      {% endfor %}
       <p class="field-note" id="review-mode-help">
         Label-Only Review is the default for fast screening. Switch to Compare mode when you want side-by-side validation against submitted values.
       </p>
@@ -53,10 +51,27 @@
       </p>
     </fieldset>
 
+    <fieldset class="mode-selector">
+      <legend>Product Profile Hint</legend>
+      {% for value, label in product_profile_options %}
+      <label class="mode-option {% if form_values.product_profile == value %}mode-option-active{% endif %}">
+        <input type="radio" name="product_profile" value="{{ value }}" {% if form_values.product_profile == value %}checked{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+      <p class="field-note">
+        Unknown / Auto infers profile from OCR evidence. Choose a profile to force profile-aware extraction and matching behavior.
+      </p>
+    </fieldset>
+
     <div class="form-row">
       <label for="image">Label Image</label>
       <input id="image" name="image" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" required>
       <p class="field-note">Accepted: PNG, JPG, JPEG, WEBP.</p>
+      <div id="image-preview-wrap" class="image-preview-wrap" hidden>
+        <p class="field-note">Selected image preview</p>
+        <img id="image-preview" alt="Selected label preview" class="image-preview">
+      </div>
     </div>
 
     <section id="compare-inputs" class="compare-inputs {% if form_values.review_mode != 'compare_application' %}compare-inputs-hidden{% endif %}">
@@ -116,7 +131,9 @@
     <li>Field-by-field comparison with status badges.</li>
     <li>Overall recommendation with review reasons.</li>
   </ul>
+  {% if enable_batch_ui %}
   <a href="/ui/batch" class="button button-secondary">Go To Batch Mode</a>
+  {% endif %}
   {% if enable_diagnostics_ui %}
   <a href="/ui/diagnostics" class="button button-secondary">Developer Diagnostics</a>
   {% endif %}

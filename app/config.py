@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     enable_preprocessing: bool = True
     enable_visualization: bool = True
     enable_diagnostics_ui: bool = False
+    enable_batch_ui: bool = True
+    allowed_review_modes: str = "label_only,compare_application"
+    allowed_label_types: str = "unknown,brand_label,other_label"
+    allowed_product_profiles: str = "unknown,distilled_spirits,malt_beverage,wine"
     enable_ocr: bool = True
     ocr_use_gpu: bool = False
     ocr_require_local_models: bool = True

@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import time
 import uuid
 import zipfile
@@ -8,13 +9,16 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.domain.enums import FieldStatus, LabelType, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus, ProductProfile
 from app.domain.models import ApplicationData, BatchResponse, BatchResult, BatchSummary
-from app.services.matching_service import build_field_results
+from app.services.inference_service import coerce_product_profile, infer_label_type, infer_product_profile
+from app.services.matching_service import build_field_results, coerce_label_type
 from app.services.parser_service import parse_ocr_text
 
 if TYPE_CHECKING:
     from app.services.ocr_service import OCRService
+
+logger = logging.getLogger(__name__)
 
 
 class BatchService:
@@ -41,24 +45,36 @@ class BatchService:
         images_archive_bytes: bytes | None,
         ocr_service: "OCRService",
         label_type: LabelType = LabelType.UNKNOWN,
+        product_profile: ProductProfile = ProductProfile.UNKNOWN,
     ) -> BatchResponse:
+        started = time.perf_counter()
         records = _parse_batch_records(batch_file_bytes, batch_filename)
         if len(records) > self.max_records:
             raise ValueError(f"Batch contains {len(records)} records, which exceeds the limit of {self.max_records}.")
 
         images_by_name = _extract_images_from_zip(images_archive_bytes, max_images=self.max_images) if images_archive_bytes else {}
+        logger.info(
+            "Batch compare started filename=%s records=%d images=%d label_type=%s product_profile=%s",
+            batch_filename,
+            len(records),
+            len(images_by_name),
+            label_type.value,
+            product_profile.value,
+        )
 
         batch_id = f"batch-{uuid.uuid4().hex[:12]}"
         results: list[BatchResult] = []
         errors: list[str] = []
 
         for index, record in enumerate(records, start=1):
+            logger.info("Batch compare progress %d/%d record_id=%s", index, len(records), record.get("record_id", ""))
             result = self._analyze_record(
                 record=record,
                 row_index=index,
                 images_by_name=images_by_name,
                 ocr_service=ocr_service,
                 label_type=label_type,
+                product_profile=product_profile,
                 evaluation_mode="compare",
             )
             results.append(result)
@@ -67,6 +83,13 @@ class BatchService:
 
         summary = _summarize(results)
         artifacts = self._write_summary_artifacts(batch_id=batch_id, results=results, summary=summary)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "Batch compare finished batch_id=%s total=%d elapsed_ms=%d",
+            batch_id,
+            len(results),
+            elapsed_ms,
+        )
         return BatchResponse(batch_id=batch_id, summary=summary, results=results, artifacts=artifacts, errors=errors)
 
     def analyze_label_only(
@@ -74,23 +97,33 @@ class BatchService:
         images_archive_bytes: bytes,
         ocr_service: "OCRService",
         label_type: LabelType = LabelType.UNKNOWN,
+        product_profile: ProductProfile = ProductProfile.UNKNOWN,
     ) -> BatchResponse:
+        started = time.perf_counter()
         images_by_name = _extract_images_from_zip(images_archive_bytes, max_images=self.max_images)
         if not images_by_name:
             raise ValueError("Image ZIP archive is empty.")
 
         records = _build_label_only_records(images_by_name)
+        logger.info(
+            "Batch label-only started images=%d label_type=%s product_profile=%s",
+            len(images_by_name),
+            label_type.value,
+            product_profile.value,
+        )
         batch_id = f"batch-{uuid.uuid4().hex[:12]}"
         results: list[BatchResult] = []
         errors: list[str] = []
 
         for index, record in enumerate(records, start=1):
+            logger.info("Batch label-only progress %d/%d image=%s", index, len(records), record.get("image_filename", ""))
             result = self._analyze_record(
                 record=record,
                 row_index=index,
                 images_by_name=images_by_name,
                 ocr_service=ocr_service,
                 label_type=label_type,
+                product_profile=product_profile,
                 evaluation_mode="label_only",
             )
             results.append(result)
@@ -99,6 +132,13 @@ class BatchService:
 
         summary = _summarize(results)
         artifacts = self._write_summary_artifacts(batch_id=batch_id, results=results, summary=summary)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "Batch label-only finished batch_id=%s total=%d elapsed_ms=%d",
+            batch_id,
+            len(results),
+            elapsed_ms,
+        )
         return BatchResponse(batch_id=batch_id, summary=summary, results=results, artifacts=artifacts, errors=errors)
 
     def _analyze_record(
@@ -108,6 +148,7 @@ class BatchService:
         images_by_name: dict[str, bytes],
         ocr_service: "OCRService",
         label_type: LabelType,
+        product_profile: ProductProfile,
         evaluation_mode: str,
     ) -> BatchResult:
         started = time.perf_counter()
@@ -136,12 +177,23 @@ class BatchService:
 
         application = ApplicationData.model_validate(record)
         ocr, ocr_errors = ocr_service.run_ocr_bytes(image_bytes, source_label=image_filename)
-        parsed = parse_ocr_text(ocr)
+        pre_parsed = parse_ocr_text(ocr, product_profile=ProductProfile.UNKNOWN)
+        profile_inference = infer_product_profile(selected_hint=product_profile, ocr=ocr, parsed=pre_parsed)
+        effective_profile = coerce_product_profile(profile_inference.get("effective_profile"))
+        parsed = parse_ocr_text(ocr, product_profile=effective_profile)
+        label_inference = infer_label_type(
+            selected_hint=label_type,
+            effective_profile=effective_profile,
+            ocr=ocr,
+            parsed=parsed,
+        )
+        effective_label_type = coerce_label_type(label_inference.get("effective_label_type"))
         field_results, overall_status, review_reasons = build_field_results(
             application,
             parsed,
-            label_type=label_type,
+            label_type=effective_label_type,
             evaluation_mode=evaluation_mode,
+            product_profile=effective_profile,
         )
 
         main_reason = _pick_main_reason(field_results=field_results, review_reasons=review_reasons, ocr_errors=ocr_errors)

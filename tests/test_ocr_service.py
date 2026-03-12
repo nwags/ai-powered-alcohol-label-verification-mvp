@@ -47,10 +47,14 @@ def test_variant_selection_uses_first_variant_in_mvp_color_only_mode(monkeypatch
     monkeypatch.setattr("app.services.ocr_service.build_ocr_variants", fake_build_variants)
     monkeypatch.setattr(service, "_run_engine_ocr", fake_run_engine_ocr)
 
-    result, errors, selected_variant = service._run_ocr_for_image(np.zeros((10, 10, 3), dtype=np.uint8), "test")
+    result, errors, selected_variant, selected_variant_image = service._run_ocr_for_image(
+        np.zeros((10, 10, 3), dtype=np.uint8),
+        "test",
+    )
     assert not errors
     assert selected_variant == "v1"
     assert result.full_text == "SHORT"
+    assert selected_variant_image is not None
 
 
 def test_build_paddleocr_kwargs_prefers_device_for_cpu():
@@ -201,6 +205,32 @@ def test_run_engine_ocr_supports_dict_result_shape():
     assert "STONE'S THROW" in result.full_text
 
 
+def test_run_engine_ocr_preserves_bbox_when_dict_shape_uses_ndarrays():
+    class FakeEngine:
+        def ocr(self, image):
+            _ = image
+            return {
+                "rec_texts": np.array(["BLUE RIDGE ESTATE", "PRODUCT OF ITALY"]),
+                "rec_scores": np.array([0.98, 0.92]),
+                "dt_polys": np.array(
+                    [
+                        [[120, 80], [520, 80], [520, 140], [120, 140]],
+                        [[130, 640], [410, 640], [410, 690], [130, 690]],
+                    ],
+                    dtype=float,
+                ),
+            }
+
+    service = OCRService(enabled=True, require_local_models=False)
+    service._engine = FakeEngine()
+    variant = ImageVariant(name="dict_shape_ndarray", image=np.zeros((800, 600, 3), dtype=np.uint8))
+
+    result = service._run_engine_ocr(variant)
+    assert len(result.lines) == 2
+    assert result.lines[0].bbox[0] == [120.0, 80.0]
+    assert result.lines[1].bbox[2] == [410.0, 690.0]
+
+
 def test_run_engine_ocr_supports_flat_line_item_shape():
     class FakeEngine:
         def predict(self, image):
@@ -256,8 +286,12 @@ def test_run_ocr_for_image_uses_only_color_variant_in_mvp_mode(monkeypatch):
     monkeypatch.setattr("app.services.ocr_service.build_ocr_variants", fake_build_variants)
     monkeypatch.setattr(service, "_run_engine_ocr", fake_run_engine_ocr)
 
-    result, errors, selected_variant = service._run_ocr_for_image(np.zeros((10, 10, 3), dtype=np.uint8), "mvp")
+    result, errors, selected_variant, selected_variant_image = service._run_ocr_for_image(
+        np.zeros((10, 10, 3), dtype=np.uint8),
+        "mvp",
+    )
     assert not errors
     assert selected_variant == "color_resized"
     assert result.full_text == "TEXT"
     assert calls == ["color_resized"]
+    assert selected_variant_image is not None

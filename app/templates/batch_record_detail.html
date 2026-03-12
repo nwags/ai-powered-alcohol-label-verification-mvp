@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <h2>Batch Record Detail</h2>
+  <p class="help-text">Batch ID: <code>{{ batch_id }}</code> | Record ID: <code>{{ record_id }}</code></p>
+  <p class="help-text"><strong>Reviewer Result:</strong> <span class="badge badge-{{ overall_status_display }}">{{ overall_status_display }}</span></p>
+  <p class="help-text"><strong>Internal Status:</strong> <span class="badge badge-{{ row.overall_status }}">{{ row.overall_status }}</span></p>
+</section>
+
+<section class="card">
+  <h3>Record Metadata</h3>
+  <ul>
+    <li><strong>Filename:</strong> {{ row.image_filename or "-" }}</li>
+    <li><strong>Main Reason:</strong> {{ row.main_reason or "-" }}</li>
+    <li><strong>Timing (ms):</strong> {{ row.timing_ms }}</li>
+    <li><strong>Request ID:</strong> <code>{{ row.request_id }}</code></li>
+  </ul>
+</section>
+
+<section class="card">
+  <a href="/ui/batch" class="button button-secondary">Back to Batch Report</a>
+</section>
+{% endblock %}

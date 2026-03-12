@@ -11,10 +11,13 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.dependencies import get_dev_diagnostics_service, get_ocr_service
-from app.domain.enums import FieldStatus, LabelType, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus, ProductProfile
 from app.domain.models import AnalyzeResponse, ApplicationData, FieldResult, ParsedFields
+from app.services.inference_service import coerce_product_profile, infer_label_type, infer_product_profile
 from app.services.matching_service import build_field_results, coerce_label_type, priority_fields_for_label_type
 from app.services.parser_service import parse_ocr_text
+from app.services.rule_registry import build_rule_trace, short_rule_tags
+from app.services.result_explanation_service import build_result_explanation, evidence_confidence_for_field
 from app.services.visualization_service import create_annotated_ocr_artifact
 
 if TYPE_CHECKING:
@@ -39,10 +42,20 @@ FIELD_LABELS = {
 REVIEW_MODE_LABEL_ONLY = "label_only"
 REVIEW_MODE_COMPARE = "compare_application"
 SUPPORTED_REVIEW_MODES = {REVIEW_MODE_LABEL_ONLY, REVIEW_MODE_COMPARE}
+REVIEW_MODE_LABELS = {
+    REVIEW_MODE_LABEL_ONLY: "Label-Only Review",
+    REVIEW_MODE_COMPARE: "Compare to Application Data",
+}
 LABEL_TYPE_LABELS = {
     LabelType.UNKNOWN: "Unknown",
     LabelType.BRAND_LABEL: "Brand Label",
     LabelType.OTHER_LABEL: "Other Label",
+}
+PRODUCT_PROFILE_LABELS = {
+    ProductProfile.UNKNOWN: "Unknown / Auto",
+    ProductProfile.DISTILLED_SPIRITS: "Distilled Spirits",
+    ProductProfile.MALT_BEVERAGE: "Malt Beverage",
+    ProductProfile.WINE: "Wine",
 }
 
 
@@ -50,17 +63,24 @@ LABEL_TYPE_LABELS = {
 def index(request: Request, ocr_service: "OCRService" = Depends(get_ocr_service)):
     ocr_status = _format_ocr_status(ocr_service.get_status())
     settings = get_settings()
+    form_values = _empty_form_values()
+    form_values["review_mode"] = _coerce_review_mode(form_values["review_mode"], settings)
+    form_values["label_type"] = _coerce_label_type_allowed(form_values["label_type"], settings).value
+    form_values["product_profile"] = _coerce_product_profile_allowed(form_values["product_profile"], settings).value
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "title": "AI-Powered Alcohol Label Verification",
             "field_labels": FIELD_LABELS,
-            "form_values": _empty_form_values(),
+            "form_values": form_values,
             "error_message": None,
             "ocr_status": ocr_status,
             "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-            "label_type_options": _label_type_options(),
+            "enable_batch_ui": settings.enable_batch_ui,
+            "review_mode_options": _review_mode_options(settings),
+            "label_type_options": _label_type_options(settings),
+            "product_profile_options": _product_profile_options(settings),
         },
     )
 
@@ -71,6 +91,7 @@ async def analyze_ui(
     image: UploadFile = File(...),
     review_mode: str = Form(default=REVIEW_MODE_LABEL_ONLY),
     label_type: str = Form(default=LabelType.UNKNOWN.value),
+    product_profile: str = Form(default=ProductProfile.UNKNOWN.value),
     application_json: str = Form(default=""),
     brand_name: str = Form(default=""),
     class_type: str = Form(default=""),
@@ -81,14 +102,14 @@ async def analyze_ui(
     government_warning: str = Form(default=""),
     ocr_service: "OCRService" = Depends(get_ocr_service),
 ):
-    if review_mode not in SUPPORTED_REVIEW_MODES:
-        review_mode = REVIEW_MODE_LABEL_ONLY
-    resolved_label_type = coerce_label_type(label_type)
-
     settings = get_settings()
+    review_mode = _coerce_review_mode(review_mode, settings)
+    resolved_label_type = _coerce_label_type_allowed(label_type, settings)
+    resolved_product_profile = _coerce_product_profile_allowed(product_profile, settings)
     form_values = {
         "review_mode": review_mode,
         "label_type": resolved_label_type.value,
+        "product_profile": resolved_product_profile.value,
         "brand_name": brand_name,
         "class_type": class_type,
         "alcohol_content": alcohol_content,
@@ -110,7 +131,10 @@ async def analyze_ui(
                 "error_message": "OCR is not ready yet. Please wait for warmup to complete.",
                 "ocr_status": ocr_status,
                 "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-                "label_type_options": _label_type_options(),
+                "enable_batch_ui": settings.enable_batch_ui,
+                "review_mode_options": _review_mode_options(settings),
+                "label_type_options": _label_type_options(settings),
+                "product_profile_options": _product_profile_options(settings),
             },
             status_code=503,
         )
@@ -128,7 +152,10 @@ async def analyze_ui(
                 "error_message": str(exc),
                 "ocr_status": ocr_status,
                 "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-                "label_type_options": _label_type_options(),
+                "enable_batch_ui": settings.enable_batch_ui,
+                "review_mode_options": _review_mode_options(settings),
+                "label_type_options": _label_type_options(settings),
+                "product_profile_options": _product_profile_options(settings),
             },
             status_code=422,
         )
@@ -144,7 +171,10 @@ async def analyze_ui(
                 "error_message": "Please upload a PNG, JPG, JPEG, or WEBP image.",
                 "ocr_status": ocr_status,
                 "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-                "label_type_options": _label_type_options(),
+                "enable_batch_ui": settings.enable_batch_ui,
+                "review_mode_options": _review_mode_options(settings),
+                "label_type_options": _label_type_options(settings),
+                "product_profile_options": _product_profile_options(settings),
             },
             status_code=415,
         )
@@ -161,7 +191,10 @@ async def analyze_ui(
                 "error_message": "The uploaded image was empty.",
                 "ocr_status": ocr_status,
                 "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-                "label_type_options": _label_type_options(),
+                "enable_batch_ui": settings.enable_batch_ui,
+                "review_mode_options": _review_mode_options(settings),
+                "label_type_options": _label_type_options(settings),
+                "product_profile_options": _product_profile_options(settings),
             },
             status_code=400,
         )
@@ -176,7 +209,10 @@ async def analyze_ui(
                 "error_message": f"Image exceeds upload size limit of {settings.max_upload_bytes} bytes.",
                 "ocr_status": ocr_status,
                 "enable_diagnostics_ui": settings.enable_diagnostics_ui,
-                "label_type_options": _label_type_options(),
+                "enable_batch_ui": settings.enable_batch_ui,
+                "review_mode_options": _review_mode_options(settings),
+                "label_type_options": _label_type_options(settings),
+                "product_profile_options": _product_profile_options(settings),
             },
             status_code=400,
         )
@@ -186,13 +222,27 @@ async def analyze_ui(
         filename=image.filename or "upload",
         application=application_data,
         label_type=resolved_label_type,
+        product_profile=resolved_product_profile,
         review_mode=review_mode,
         enable_visualization=settings.enable_visualization,
         storage_dir=Path(settings.storage_dir),
         ocr_service=ocr_service,
     )
     uploaded_path = _persist_upload(image_bytes=image_bytes, original_name=image.filename or "upload")
-    field_rows = _build_field_rows(analysis, resolved_label_type)
+    inference_payload = _extract_inference(analysis)
+    effective_label_type = coerce_label_type(inference_payload["label_type"].get("effective_label_type"))
+    effective_product_profile = coerce_product_profile(inference_payload["product_profile"].get("effective_profile"))
+    detected_label_type = coerce_label_type(inference_payload["label_type"].get("detected_label_type"))
+    detected_profile = coerce_product_profile(inference_payload["product_profile"].get("detected_profile"))
+    explanation = build_result_explanation(
+        analysis=analysis,
+        parsed=analysis.parsed,
+        review_mode=review_mode,
+        effective_label_type=effective_label_type,
+        effective_product_profile=effective_product_profile,
+        field_labels=FIELD_LABELS,
+    )
+    field_rows = _build_field_rows(analysis, effective_label_type, parsed=analysis.parsed, priority_fields=explanation.priority_fields)
 
     return templates.TemplateResponse(
         request=request,
@@ -200,13 +250,30 @@ async def analyze_ui(
         context={
             "title": "Analysis Result",
             "analysis": analysis,
+            "review_mode": review_mode,
             "field_rows": field_rows,
             "uploaded_image_url": f"/storage/{uploaded_path}",
             "annotated_image_url": analysis.artifacts.get("annotated_image_path"),
+            "uploaded_filename": image.filename or "upload",
             "overall_recommendation": _overall_recommendation(analysis.overall_status.value),
+            "ui_overall_badge": explanation.ui_overall_badge,
+            "ui_overall_label": explanation.ui_overall_label,
+            "ui_overall_reason": explanation.ui_overall_reason,
+            "overall_evidence_confidence": explanation.overall_evidence_confidence,
+            "priority_summary": explanation.priority_summary,
+            "non_priority_notice": explanation.non_priority_notice,
+            "top_contributing_fields": explanation.top_contributing_fields,
+            "top_rules": explanation.top_rules,
+            "rule_trace_details": explanation.rule_trace_details,
             "ocr_errors": analysis.errors,
             "review_reasons": analysis.review_reasons,
-            "label_type_display": LABEL_TYPE_LABELS[resolved_label_type],
+            "label_type_display": LABEL_TYPE_LABELS[effective_label_type],
+            "label_type_hint_display": LABEL_TYPE_LABELS[resolved_label_type],
+            "detected_label_type_display": LABEL_TYPE_LABELS[detected_label_type],
+            "product_profile_display": PRODUCT_PROFILE_LABELS[effective_product_profile],
+            "product_profile_hint_display": PRODUCT_PROFILE_LABELS[resolved_product_profile],
+            "detected_product_profile_display": PRODUCT_PROFILE_LABELS[detected_profile],
+            "inference_payload": inference_payload,
         },
     )
 
@@ -295,6 +362,15 @@ def _build_diagnostics_context(
     }
     coverage = _load_coverage_summary(settings.coverage_dir)
     coverage_run = diagnostics_service.coverage_status()
+    if (
+        isinstance(coverage_run, dict)
+        and coverage_run.get("state") == "failure"
+        and bool(coverage.get("available"))
+        and isinstance(coverage_run.get("message"), str)
+    ):
+        coverage_run["message"] = (
+            f"{coverage_run['message']} Last successful coverage summary artifacts are still available below."
+        )
     recent_logs = diagnostics_service.recent_logs(limit=150)
 
     return {
@@ -328,26 +404,64 @@ def _run_analysis(
     filename: str,
     application: ApplicationData,
     label_type: LabelType,
+    product_profile: ProductProfile,
     review_mode: str,
     enable_visualization: bool,
     storage_dir: Path,
     ocr_service: "OCRService",
 ) -> AnalyzeResponse:
     started = time.perf_counter()
-    ocr, ocr_errors = ocr_service.run_ocr_bytes(image_bytes, source_label=filename)
-    artifacts: dict[str, str] = {}
-    if enable_visualization:
-        annotated_path = create_annotated_ocr_artifact(image_bytes=image_bytes, ocr=ocr, storage_dir=storage_dir)
-        if annotated_path:
-            artifacts["annotated_image_path"] = f"/storage/{annotated_path}"
+    variant_image = None
     try:
-        parsed = parse_ocr_text(ocr)
+        ocr_run = ocr_service.run_ocr_bytes(image_bytes, source_label=filename, return_variant_image=True)
+    except TypeError:
+        ocr_run = ocr_service.run_ocr_bytes(image_bytes, source_label=filename)
+
+    if isinstance(ocr_run, tuple) and len(ocr_run) == 3:
+        ocr, ocr_errors, variant_image = ocr_run
+    else:
+        ocr, ocr_errors = ocr_run
+    artifacts: dict[str, object] = {}
+    try:
+        pre_parsed = parse_ocr_text(ocr, product_profile=ProductProfile.UNKNOWN)
+        profile_inference = infer_product_profile(selected_hint=product_profile, ocr=ocr, parsed=pre_parsed)
+        effective_profile = coerce_product_profile(profile_inference.get("effective_profile"))
+        parsed = parse_ocr_text(ocr, product_profile=effective_profile)
+        label_inference = infer_label_type(
+            selected_hint=label_type,
+            effective_profile=effective_profile,
+            ocr=ocr,
+            parsed=parsed,
+        )
+        effective_label_type = coerce_label_type(label_inference.get("effective_label_type"))
+        rule_ids_by_field: dict[str, list[str]] = {}
+        if isinstance(profile_inference.get("rule_ids"), list):
+            rule_ids_by_field["profile_inference"] = [str(value) for value in profile_inference["rule_ids"]]
+        if isinstance(label_inference.get("rule_ids"), list):
+            rule_ids_by_field["label_type_inference"] = [str(value) for value in label_inference["rule_ids"]]
         field_results, overall_status, review_reasons = build_field_results(
             application,
             parsed,
-            label_type=label_type,
+            label_type=effective_label_type,
             evaluation_mode="label_only" if review_mode == REVIEW_MODE_LABEL_ONLY else "compare",
+            product_profile=effective_profile,
+            rule_ids_by_field=rule_ids_by_field,
         )
+        artifacts["inference"] = {"product_profile": profile_inference, "label_type": label_inference}
+        artifacts["rule_trace"] = build_rule_trace(rule_ids_by_field)
+        if enable_visualization:
+            annotated_path = create_annotated_ocr_artifact(
+                image_bytes=image_bytes,
+                ocr=ocr,
+                storage_dir=storage_dir,
+                parsed=parsed,
+                base_image=variant_image,
+                bbox_space_hint="render_pixels" if variant_image is not None else "auto",
+            )
+            if annotated_path:
+                artifacts["annotated_image_path"] = f"/storage/{annotated_path}"
+            elif ocr.lines:
+                ocr_errors.append("annotation_unavailable: no drawable OCR bounding boxes were available")
     except Exception as exc:  # pragma: no cover - defensive path
         ocr_errors.append(f"analysis_failed: {exc.__class__.__name__}")
         parsed = ParsedFields()
@@ -402,18 +516,35 @@ def _persist_upload(image_bytes: bytes, original_name: str) -> str:
     return f"uploads/{target_name}"
 
 
-def _build_field_rows(analysis: AnalyzeResponse, label_type: LabelType) -> list[dict[str, str | None]]:
+def _build_field_rows(
+    analysis: AnalyzeResponse,
+    label_type: LabelType,
+    parsed: ParsedFields,
+    priority_fields: list[str],
+) -> list[dict[str, str | None]]:
     rows: list[dict[str, str | None]] = []
-    priority_fields = set(priority_fields_for_label_type(label_type))
+    confidence_bands = {"high", "medium", "low", "unknown"}
+    priority_field_set = set(priority_fields)
     is_hint_mode = label_type != LabelType.UNKNOWN
     for field_name, label in FIELD_LABELS.items():
         result = analysis.field_results.get(field_name)
         if result is None:
             continue
         notes = result.notes
-        if is_hint_mode and field_name not in priority_fields:
+        rule_ids = _rule_ids_for_field(analysis, field_name)
+        if rule_ids:
+            notes = f"{notes or ''}{short_rule_tags(rule_ids)}".strip()
+        if is_hint_mode and field_name not in priority_field_set:
             info_note = "Informational for selected label type."
             notes = f"{notes} {info_note}".strip() if notes else info_note
+        confidence = evidence_confidence_for_field(
+            field_name=field_name,
+            status=result.status,
+            parsed=parsed,
+        )
+        normalized_confidence = confidence.lower().strip() if isinstance(confidence, str) else "unknown"
+        if normalized_confidence not in confidence_bands:
+            normalized_confidence = "unknown"
         rows.append(
             {
                 "field_name": field_name,
@@ -421,6 +552,8 @@ def _build_field_rows(analysis: AnalyzeResponse, label_type: LabelType) -> list[
                 "submitted_value": result.submitted_value,
                 "detected_value": result.detected_value,
                 "status": result.status.value,
+                "is_priority": field_name in priority_field_set,
+                "evidence_confidence": normalized_confidence,
                 "notes": notes,
             }
         )
@@ -441,6 +574,7 @@ def _empty_form_values() -> dict[str, str]:
     return {
         "review_mode": REVIEW_MODE_LABEL_ONLY,
         "label_type": LabelType.UNKNOWN.value,
+        "product_profile": ProductProfile.UNKNOWN.value,
         "brand_name": "",
         "class_type": "",
         "alcohol_content": "",
@@ -452,8 +586,108 @@ def _empty_form_values() -> dict[str, str]:
     }
 
 
-def _label_type_options() -> list[tuple[str, str]]:
-    return [(value.value, label) for value, label in LABEL_TYPE_LABELS.items()]
+def _review_mode_options(settings: object) -> list[tuple[str, str]]:
+    values = _allowed_review_modes(settings)
+    return [(value, REVIEW_MODE_LABELS[value]) for value in values]
+
+
+def _label_type_options(settings: object) -> list[tuple[str, str]]:
+    values = _allowed_label_types(settings)
+    return [(value.value, LABEL_TYPE_LABELS[value]) for value in values]
+
+
+def _product_profile_options(settings: object) -> list[tuple[str, str]]:
+    values = _allowed_product_profiles(settings)
+    return [(value.value, PRODUCT_PROFILE_LABELS[value]) for value in values]
+
+
+def _coerce_review_mode(value: str, settings: object) -> str:
+    allowed = _allowed_review_modes(settings)
+    if value in allowed:
+        return value
+    return REVIEW_MODE_LABEL_ONLY if REVIEW_MODE_LABEL_ONLY in allowed else allowed[0]
+
+
+def _coerce_label_type_allowed(value: str, settings: object) -> LabelType:
+    candidate = coerce_label_type(value)
+    allowed = _allowed_label_types(settings)
+    if candidate in allowed:
+        return candidate
+    return LabelType.UNKNOWN if LabelType.UNKNOWN in allowed else allowed[0]
+
+
+def _coerce_product_profile_allowed(value: str, settings: object) -> ProductProfile:
+    candidate = coerce_product_profile(value)
+    allowed = _allowed_product_profiles(settings)
+    if candidate in allowed:
+        return candidate
+    return ProductProfile.UNKNOWN if ProductProfile.UNKNOWN in allowed else allowed[0]
+
+
+def _allowed_review_modes(settings: object) -> list[str]:
+    allowed = _parse_allowed_csv(getattr(settings, "allowed_review_modes", None), valid_order=list(REVIEW_MODE_LABELS.keys()))
+    return allowed or [REVIEW_MODE_LABEL_ONLY, REVIEW_MODE_COMPARE]
+
+
+def _allowed_label_types(settings: object) -> list[LabelType]:
+    raw_values = _parse_allowed_csv(
+        getattr(settings, "allowed_label_types", None),
+        valid_order=[value.value for value in LABEL_TYPE_LABELS.keys()],
+    )
+    values = [coerce_label_type(raw) for raw in raw_values]
+    if values:
+        return values
+    return [LabelType.UNKNOWN, LabelType.BRAND_LABEL, LabelType.OTHER_LABEL]
+
+
+def _allowed_product_profiles(settings: object) -> list[ProductProfile]:
+    raw_values = _parse_allowed_csv(
+        getattr(settings, "allowed_product_profiles", None),
+        valid_order=[value.value for value in PRODUCT_PROFILE_LABELS.keys()],
+    )
+    values = [coerce_product_profile(raw) for raw in raw_values]
+    if values:
+        return values
+    return [ProductProfile.UNKNOWN, ProductProfile.DISTILLED_SPIRITS, ProductProfile.MALT_BEVERAGE, ProductProfile.WINE]
+
+
+def _parse_allowed_csv(raw_value: object, valid_order: list[str]) -> list[str]:
+    if not isinstance(raw_value, str):
+        return valid_order
+    seen: set[str] = set()
+    output: list[str] = []
+    for part in raw_value.split(","):
+        normalized = part.strip().lower()
+        if normalized in valid_order and normalized not in seen:
+            seen.add(normalized)
+            output.append(normalized)
+    return output or valid_order
+
+
+def _extract_inference(analysis: AnalyzeResponse) -> dict[str, dict[str, object]]:
+    payload = analysis.artifacts.get("inference", {})
+    if isinstance(payload, dict):
+        product_profile = payload.get("product_profile", {})
+        label_type = payload.get("label_type", {})
+        if isinstance(product_profile, dict) and isinstance(label_type, dict):
+            return {"product_profile": product_profile, "label_type": label_type}
+    return {"product_profile": {}, "label_type": {}}
+
+
+def _rule_ids_for_field(analysis: AnalyzeResponse, field_name: str) -> list[str]:
+    payload = analysis.artifacts.get("rule_trace", {})
+    if not isinstance(payload, dict):
+        return []
+    entries = payload.get(field_name)
+    if not isinstance(entries, list):
+        return []
+    rule_ids: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            rule_id = entry.get("rule_id")
+            if isinstance(rule_id, str):
+                rule_ids.append(rule_id)
+    return rule_ids
 
 
 def _review_field_results(application: ApplicationData) -> dict[str, FieldResult]:

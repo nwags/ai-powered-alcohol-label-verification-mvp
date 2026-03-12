@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 
 from app.config import get_settings
 from app.dependencies import get_ocr_service
-from app.domain.enums import FieldStatus, LabelType, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus, ProductProfile
 from app.domain.models import (
     AnalyzeResponse,
     ApplicationData,
@@ -17,7 +17,9 @@ from app.domain.models import (
     ParsedFields,
 )
 from app.services.matching_service import build_field_results, coerce_label_type
+from app.services.inference_service import coerce_product_profile, infer_label_type, infer_product_profile
 from app.services.parser_service import parse_ocr_text
+from app.services.rule_registry import build_rule_trace
 
 if TYPE_CHECKING:
     from app.services.ocr_service import OCRService
@@ -32,6 +34,7 @@ async def analyze(
     image: UploadFile = File(...),
     application_json: str = Form(...),
     label_type: str = Form(default=LabelType.UNKNOWN.value),
+    product_profile: str = Form(default=ProductProfile.UNKNOWN.value),
     ocr_service: "OCRService" = Depends(get_ocr_service),
 ) -> AnalyzeResponse:
     started = time.perf_counter()
@@ -70,15 +73,45 @@ async def analyze(
         )
 
     resolved_label_type = coerce_label_type(label_type)
+    resolved_product_profile = coerce_product_profile(product_profile)
     ocr, ocr_errors = ocr_service.run_ocr_bytes(image_bytes, source_label=image.filename or "upload")
+    artifacts: dict[str, object] = {}
     try:
-        parsed = parse_ocr_text(ocr)
+        pre_parsed = parse_ocr_text(ocr, product_profile=ProductProfile.UNKNOWN)
+        profile_inference = infer_product_profile(
+            selected_hint=resolved_product_profile,
+            ocr=ocr,
+            parsed=pre_parsed,
+        )
+        effective_profile = coerce_product_profile(profile_inference.get("effective_profile"))
+        parsed = parse_ocr_text(ocr, product_profile=effective_profile)
+        label_inference = infer_label_type(
+            selected_hint=resolved_label_type,
+            effective_profile=effective_profile,
+            ocr=ocr,
+            parsed=parsed,
+        )
+        effective_label_type = coerce_label_type(label_inference.get("effective_label_type"))
+        rule_ids_by_field: dict[str, list[str]] = {}
+        if isinstance(profile_inference.get("rule_ids"), list):
+            rule_ids_by_field["profile_inference"] = [str(value) for value in profile_inference["rule_ids"]]
+        if isinstance(label_inference.get("rule_ids"), list):
+            rule_ids_by_field["label_type_inference"] = [str(value) for value in label_inference["rule_ids"]]
         field_results, overall_status, review_reasons = build_field_results(
             application,
             parsed,
-            label_type=resolved_label_type,
+            label_type=effective_label_type,
             evaluation_mode="compare",
+            product_profile=effective_profile,
+            rule_ids_by_field=rule_ids_by_field,
         )
+        artifacts = {
+            "inference": {
+                "product_profile": profile_inference,
+                "label_type": label_inference,
+            },
+            "rule_trace": build_rule_trace(rule_ids_by_field),
+        }
     except Exception as exc:  # pragma: no cover - defensive path
         ocr_errors.append(f"analysis_failed: {exc.__class__.__name__}")
         parsed = ParsedFields()
@@ -95,7 +128,7 @@ async def analyze(
         parsed=parsed,
         field_results=field_results,
         review_reasons=review_reasons,
-        artifacts={},
+        artifacts=artifacts,
         errors=ocr_errors,
     )
 

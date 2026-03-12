@@ -28,6 +28,16 @@
   const coverageNumStatements = document.getElementById("coverage-num-statements");
   const coverageHtmlLink = document.getElementById("coverage-html-link");
   const coverageHtmlMissing = document.getElementById("coverage-html-missing");
+  const imageInput = document.getElementById("image");
+  const imagePreviewWrap = document.getElementById("image-preview-wrap");
+  const imagePreview = document.getElementById("image-preview");
+  const lightbox = document.getElementById("image-lightbox");
+  const lightboxImage = document.getElementById("image-lightbox-image");
+  const lightboxTitle = document.getElementById("image-lightbox-title");
+  let imagePreviewUrl = null;
+
+  initializeModeSelectors();
+  initializeImageLightbox();
 
   if (fillJsonButton && jsonTextArea) {
     fillJsonButton.addEventListener("click", function () {
@@ -81,6 +91,16 @@
 
   if (coverageCard && coverageRunState && coverageRunMessage && coverageRunExitCode) {
     startCoverageStatusPolling();
+  }
+
+  if (imageInput && imagePreviewWrap && imagePreview) {
+    imageInput.addEventListener("change", function () {
+      const file = imageInput.files && imageInput.files[0] ? imageInput.files[0] : null;
+      renderImagePreview(file);
+    });
+
+    const initialFile = imageInput.files && imageInput.files[0] ? imageInput.files[0] : null;
+    renderImagePreview(initialFile);
   }
 
   function getValue(id) {
@@ -147,6 +167,102 @@
     if (!compareMode) {
       clearCompareFields();
     }
+  }
+
+  function initializeModeSelectors() {
+    document.querySelectorAll(".mode-selector").forEach(function (group) {
+      const options = group.querySelectorAll(".mode-option");
+      const radios = group.querySelectorAll('input[type=\"radio\"]');
+      if (options.length === 0 || radios.length === 0) {
+        return;
+      }
+      const sync = function () {
+        options.forEach(function (option) {
+          const input = option.querySelector('input[type=\"radio\"]');
+          option.classList.toggle("mode-option-active", Boolean(input && input.checked));
+        });
+      };
+      radios.forEach(function (radio) {
+        radio.addEventListener("change", sync);
+      });
+      options.forEach(function (option) {
+        option.addEventListener("click", function () {
+          const input = option.querySelector('input[type=\"radio\"]');
+          if (!input || input.disabled) {
+            return;
+          }
+          if (!input.checked) {
+            input.checked = true;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          } else {
+            sync();
+          }
+        });
+      });
+      sync();
+    });
+  }
+
+  function renderImagePreview(file) {
+    if (!imagePreviewWrap || !imagePreview) {
+      return;
+    }
+    if (!file || (file.type && !file.type.startsWith("image/"))) {
+      if (imagePreviewUrl) {
+        URL.revokeObjectURL(imagePreviewUrl);
+        imagePreviewUrl = null;
+      }
+      imagePreview.removeAttribute("src");
+      imagePreviewWrap.hidden = true;
+      return;
+    }
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+    imagePreviewUrl = URL.createObjectURL(file);
+    imagePreview.src = imagePreviewUrl;
+    imagePreviewWrap.hidden = false;
+  }
+
+  function initializeImageLightbox() {
+    if (!lightbox || !lightboxImage) {
+      return;
+    }
+    const zoomableImages = document.querySelectorAll(".js-lightbox-image");
+    if (zoomableImages.length === 0) {
+      return;
+    }
+    zoomableImages.forEach(function (img) {
+      img.addEventListener("click", function () {
+        const source = img.getAttribute("src");
+        if (!source) {
+          return;
+        }
+        lightboxImage.setAttribute("src", source);
+        if (lightboxTitle) {
+          lightboxTitle.textContent = img.dataset.lightboxTitle || "Image";
+        }
+        lightbox.hidden = false;
+        lightbox.setAttribute("aria-hidden", "false");
+      });
+    });
+    lightbox.querySelectorAll("[data-lightbox-close]").forEach(function (target) {
+      target.addEventListener("click", closeLightbox);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !lightbox.hidden) {
+        closeLightbox();
+      }
+    });
+  }
+
+  function closeLightbox() {
+    if (!lightbox || !lightboxImage) {
+      return;
+    }
+    lightbox.hidden = true;
+    lightbox.setAttribute("aria-hidden", "true");
+    lightboxImage.removeAttribute("src");
   }
 
   function clearCompareFields() {

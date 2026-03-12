@@ -3,6 +3,7 @@ from collections import deque
 
 RECENT_LOG_BUFFER_MAX = 300
 _recent_logs: deque[str] = deque(maxlen=RECENT_LOG_BUFFER_MAX)
+_ring_handler: "RingBufferLogHandler | None" = None
 
 
 class RingBufferLogHandler(logging.Handler):
@@ -15,17 +16,36 @@ class RingBufferLogHandler(logging.Handler):
 
 
 def configure_logging(log_level: str = "INFO") -> None:
+    global _ring_handler
     resolved_level = getattr(logging, log_level.upper(), logging.INFO)
     logging.basicConfig(
         level=resolved_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     root_logger = logging.getLogger()
+    root_logger.setLevel(resolved_level)
+    if _ring_handler is None:
+        _ring_handler = RingBufferLogHandler()
+        _ring_handler.setLevel(logging.DEBUG)
+        _ring_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
     if not any(isinstance(handler, RingBufferLogHandler) for handler in root_logger.handlers):
-        ring_handler = RingBufferLogHandler()
-        ring_handler.setLevel(resolved_level)
-        ring_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-        root_logger.addHandler(ring_handler)
+        root_logger.addHandler(_ring_handler)
+
+    # Capture common server/runtime loggers even when they do not propagate to root.
+    capture_logger_names = [
+        "app",
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "gunicorn",
+        "gunicorn.error",
+        "gunicorn.access",
+    ]
+    for logger_name in capture_logger_names:
+        logger = logging.getLogger(logger_name)
+        if not any(isinstance(handler, RingBufferLogHandler) for handler in logger.handlers):
+            logger.addHandler(_ring_handler)
 
     noisy_logger_names = [
         "httpx",

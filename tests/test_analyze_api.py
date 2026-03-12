@@ -24,6 +24,9 @@ def test_analyze_returns_contract_shape(client):
     assert body["overall_status"] in {"match", "normalized_match", "mismatch", "review"}
     assert body["field_results"]["government_warning"]["status"] in {"match", "normalized_match", "mismatch", "review"}
     assert isinstance(body["ocr"]["full_text"], str)
+    assert "inference" in body["artifacts"]
+    assert "rule_trace" in body["artifacts"]
+    assert "profile_inference" in body["artifacts"]["rule_trace"]
 
 
 def test_analyze_rejects_unsupported_media_type(client):
@@ -55,3 +58,15 @@ def test_analyze_accepts_label_type_hint(client):
     assert response.status_code == 200
     body = response.json()
     assert body["overall_status"] in {"match", "normalized_match", "mismatch", "review"}
+
+
+def test_analyze_accepts_product_profile_hint(client):
+    payload = {"brand_name": "Stone's Throw Whiskey"}
+    files = {"image": ("label.jpg", build_test_image_bytes(), "image/jpeg")}
+    data = {"application_json": json.dumps(payload), "product_profile": "wine"}
+
+    response = client.post("/api/v1/analyze", files=files, data=data)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifacts"]["inference"]["product_profile"]["selected_hint"] == "wine"

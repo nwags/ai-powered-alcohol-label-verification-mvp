@@ -29,3 +29,10 @@ class LabelType(str, Enum):
     UNKNOWN = "unknown"
     BRAND_LABEL = "brand_label"
     OTHER_LABEL = "other_label"
+
+
+class ProductProfile(str, Enum):
+    UNKNOWN = "unknown"
+    DISTILLED_SPIRITS = "distilled_spirits"
+    MALT_BEVERAGE = "malt_beverage"
+    WINE = "wine"

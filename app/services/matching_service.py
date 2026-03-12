@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain.enums import FieldStatus, LabelType, OverallStatus
+from app.domain.enums import FieldStatus, LabelType, OverallStatus, ProductProfile
 from app.domain.models import ApplicationData, FieldResult, ParsedFields
 from app.services.parser_service import normalize_text, parse_alcohol_content, parse_net_contents
 from app.services.warning_service import compare_warning_statement
@@ -14,6 +14,8 @@ def build_field_results(
     parsed: ParsedFields,
     label_type: LabelType = LabelType.UNKNOWN,
     evaluation_mode: str = EVAL_MODE_COMPARE,
+    product_profile: ProductProfile = ProductProfile.UNKNOWN,
+    rule_ids_by_field: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, FieldResult], OverallStatus, list[str]]:
     """Build field-level outcomes in compare or label-only evaluation mode."""
     resolved_mode = _coerce_evaluation_mode(evaluation_mode)
@@ -22,14 +24,25 @@ def build_field_results(
 
     if resolved_mode == EVAL_MODE_LABEL_ONLY:
         results["brand_name"] = _evaluate_text_field_label_only(parsed.brand_name.value, "brand_name")
+        _add_rule(rule_ids_by_field, "brand_name", "PARSE-BRAND-BASE")
         results["class_type"] = _evaluate_text_field_label_only(parsed.class_type.value, "class_type")
+        _add_rule(rule_ids_by_field, "class_type", "PARSE-CLASS-PROFILE")
         results["alcohol_content"] = _evaluate_alcohol_content_label_only(
             parsed.alcohol_content.abv_percent,
             parsed.alcohol_content.raw,
+            product_profile=product_profile,
         )
-        results["net_contents"] = _evaluate_net_contents_label_only(parsed.net_contents.milliliters, parsed.net_contents.raw)
+        _add_rule(rule_ids_by_field, "alcohol_content", "PARSE-ALCOHOL-NORMALIZE")
+        results["net_contents"] = _evaluate_net_contents_label_only(
+            parsed.net_contents.milliliters,
+            parsed.net_contents.raw,
+            product_profile=product_profile,
+        )
+        _add_rule(rule_ids_by_field, "net_contents", "PARSE-NET-PROFILE")
         results["bottler_producer"] = _evaluate_text_field_label_only(parsed.bottler_producer.value, "bottler_producer")
+        _add_rule(rule_ids_by_field, "bottler_producer", "PARSE-BOTTLER-ROLE")
         results["country_of_origin"] = _evaluate_text_field_label_only(parsed.country_of_origin.value, "country_of_origin")
+        _add_rule(rule_ids_by_field, "country_of_origin", "PARSE-COUNTRY-IMPORT")
     else:
         results["brand_name"] = _compare_text_field(
             application.brand_name,
@@ -37,26 +50,41 @@ def build_field_results(
             field_label="brand_name",
             allow_partial_review=True,
         )
+        _add_rule(rule_ids_by_field, "brand_name", "PARSE-BRAND-BASE")
         results["class_type"] = _compare_text_field(
             application.class_type,
             parsed.class_type.value,
             field_label="class_type",
             allow_partial_review=False,
         )
-        results["alcohol_content"] = _compare_alcohol_content(application.alcohol_content, parsed.alcohol_content.abv_percent)
-        results["net_contents"] = _compare_net_contents(application.net_contents, parsed.net_contents.milliliters, parsed.net_contents.raw)
+        _add_rule(rule_ids_by_field, "class_type", "PARSE-CLASS-PROFILE")
+        results["alcohol_content"] = _compare_alcohol_content(
+            application.alcohol_content,
+            parsed.alcohol_content.abv_percent,
+            product_profile=product_profile,
+        )
+        _add_rule(rule_ids_by_field, "alcohol_content", "PARSE-ALCOHOL-NORMALIZE")
+        results["net_contents"] = _compare_net_contents(
+            application.net_contents,
+            parsed.net_contents.milliliters,
+            parsed.net_contents.raw,
+            product_profile=product_profile,
+        )
+        _add_rule(rule_ids_by_field, "net_contents", "PARSE-NET-PROFILE")
         results["bottler_producer"] = _compare_text_field(
             application.bottler_producer,
             parsed.bottler_producer.value,
             field_label="bottler_producer",
             allow_partial_review=True,
         )
+        _add_rule(rule_ids_by_field, "bottler_producer", "PARSE-BOTTLER-ROLE")
         results["country_of_origin"] = _compare_text_field(
             application.country_of_origin,
             parsed.country_of_origin.value,
             field_label="country_of_origin",
             allow_partial_review=True,
         )
+        _add_rule(rule_ids_by_field, "country_of_origin", "PARSE-COUNTRY-IMPORT")
 
     warning_result, warning_reasons = compare_warning_statement(
         submitted_value=application.government_warning,
@@ -67,6 +95,7 @@ def build_field_results(
         evaluation_mode=resolved_mode,
     )
     results["government_warning"] = warning_result
+    _add_rule(rule_ids_by_field, "government_warning", "WARN-SHARED")
     review_reasons.extend(warning_reasons)
 
     review_reasons.extend(_review_reasons_for_results(results, resolved_mode))
@@ -178,7 +207,11 @@ def _compare_text_field(
     )
 
 
-def _compare_alcohol_content(submitted_value: str | None, detected_abv_percent: float | None) -> FieldResult:
+def _compare_alcohol_content(
+    submitted_value: str | None,
+    detected_abv_percent: float | None,
+    product_profile: ProductProfile,
+) -> FieldResult:
     if not submitted_value or detected_abv_percent is None:
         return FieldResult(
             status=FieldStatus.REVIEW,
@@ -187,7 +220,7 @@ def _compare_alcohol_content(submitted_value: str | None, detected_abv_percent: 
             notes="alcohol_content: missing parsed ABV from submitted or OCR data.",
         )
 
-    submitted = parse_alcohol_content(submitted_value)
+    submitted = parse_alcohol_content(submitted_value, product_profile=product_profile)
     submitted_abv = submitted.abv_percent
     if submitted_abv is None:
         return FieldResult(
@@ -214,7 +247,12 @@ def _compare_alcohol_content(submitted_value: str | None, detected_abv_percent: 
     )
 
 
-def _compare_net_contents(submitted_value: str | None, detected_ml: int | None, detected_raw: str | None) -> FieldResult:
+def _compare_net_contents(
+    submitted_value: str | None,
+    detected_ml: int | None,
+    detected_raw: str | None,
+    product_profile: ProductProfile,
+) -> FieldResult:
     if not submitted_value or detected_ml is None:
         return FieldResult(
             status=FieldStatus.REVIEW,
@@ -223,7 +261,7 @@ def _compare_net_contents(submitted_value: str | None, detected_ml: int | None, 
             notes="net_contents: missing parsed milliliters from submitted or OCR data.",
         )
 
-    submitted = parse_net_contents(submitted_value)
+    submitted = parse_net_contents(submitted_value, product_profile=product_profile)
     if submitted.milliliters is None:
         return FieldResult(
             status=FieldStatus.REVIEW,
@@ -250,12 +288,13 @@ def _compare_net_contents(submitted_value: str | None, detected_ml: int | None, 
 
 
 def _evaluate_text_field_label_only(detected_value: str | None, field_label: str) -> FieldResult:
+    field_phrase = field_label.replace("_", " ")
     if not detected_value:
         return FieldResult(
             status=FieldStatus.REVIEW,
             submitted_value=None,
             detected_value=None,
-            notes=f"{field_label}: OCR evidence not confidently detected.",
+            notes=f"{field_phrase}: OCR evidence not confidently detected.",
         )
 
     normalized = normalize_text(detected_value)
@@ -264,7 +303,7 @@ def _evaluate_text_field_label_only(detected_value: str | None, field_label: str
             status=FieldStatus.REVIEW,
             submitted_value=None,
             detected_value=detected_value,
-            notes=f"{field_label}: detected text is too weak for confidence.",
+            notes=f"{field_phrase}: detected text is too weak for confidence.",
         )
 
     if normalized in {"na", "n a", "none", "unknown"}:
@@ -272,7 +311,7 @@ def _evaluate_text_field_label_only(detected_value: str | None, field_label: str
             status=FieldStatus.MISMATCH,
             submitted_value=None,
             detected_value=detected_value,
-            notes=f"{field_label}: detected content appears invalid.",
+            notes=f"{field_phrase}: detected content appears invalid.",
         )
 
     normalized_display = " ".join(detected_value.split())
@@ -282,15 +321,26 @@ def _evaluate_text_field_label_only(detected_value: str | None, field_label: str
         submitted_value=None,
         detected_value=detected_value,
         notes=(
-            f"{field_label}: strong OCR evidence detected after normalization."
+            f"{field_phrase}: strong OCR evidence detected after normalization."
             if normalized_needed
-            else f"{field_label}: strong OCR evidence detected."
+            else f"{field_phrase}: strong OCR evidence detected."
         ),
     )
 
 
-def _evaluate_alcohol_content_label_only(detected_abv_percent: float | None, detected_raw: str | None) -> FieldResult:
+def _evaluate_alcohol_content_label_only(
+    detected_abv_percent: float | None,
+    detected_raw: str | None,
+    product_profile: ProductProfile,
+) -> FieldResult:
     if detected_abv_percent is None:
+        if product_profile in {ProductProfile.MALT_BEVERAGE, ProductProfile.WINE}:
+            return FieldResult(
+                status=FieldStatus.REVIEW,
+                submitted_value=None,
+                detected_value=detected_raw,
+                notes="alcohol content: not confidently parsed (allowed to be conditional for this profile).",
+            )
         return FieldResult(
             status=FieldStatus.REVIEW,
             submitted_value=None,
@@ -317,7 +367,11 @@ def _evaluate_alcohol_content_label_only(detected_abv_percent: float | None, det
     )
 
 
-def _evaluate_net_contents_label_only(detected_ml: int | None, detected_raw: str | None) -> FieldResult:
+def _evaluate_net_contents_label_only(
+    detected_ml: int | None,
+    detected_raw: str | None,
+    product_profile: ProductProfile,
+) -> FieldResult:
     if detected_ml is None:
         return FieldResult(
             status=FieldStatus.REVIEW,
@@ -334,6 +388,8 @@ def _evaluate_net_contents_label_only(detected_ml: int | None, detected_raw: str
         )
     expected_canonical = f"{detected_ml} ml"
     normalized_needed = not detected_raw or normalize_text(detected_raw) != expected_canonical
+    if product_profile == ProductProfile.MALT_BEVERAGE and detected_raw and "oz" in normalize_text(detected_raw):
+        normalized_needed = True
     return FieldResult(
         status=FieldStatus.NORMALIZED_MATCH if normalized_needed else FieldStatus.MATCH,
         submitted_value=None,
@@ -401,3 +457,11 @@ def _dedupe(values: list[str]) -> list[str]:
             deduped.append(value)
             seen.add(value)
     return deduped
+
+
+def _add_rule(rule_ids_by_field: dict[str, list[str]] | None, field_name: str, rule_id: str) -> None:
+    if rule_ids_by_field is None:
+        return
+    rule_ids_by_field.setdefault(field_name, [])
+    if rule_id not in rule_ids_by_field[field_name]:
+        rule_ids_by_field[field_name].append(rule_id)

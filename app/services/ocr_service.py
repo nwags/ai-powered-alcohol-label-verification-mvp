@@ -190,18 +190,25 @@ class OCRService:
 
     def run_ocr(self, image_path: str) -> OCRResult:
         image = read_image(image_path)
-        result, errors, selected_variant = self._run_ocr_for_image(image, source_label=image_path)
+        result, errors, selected_variant, _ = self._run_ocr_for_image(image, source_label=image_path)
         if errors:
             raise RuntimeError("; ".join(errors))
         logger.info("OCR completed for %s using variant=%s lines=%d", image_path, selected_variant, len(result.lines))
         return result
 
-    def run_ocr_bytes(self, image_bytes: bytes, source_label: str = "upload") -> tuple[OCRResult, list[str]]:
+    def run_ocr_bytes(
+        self,
+        image_bytes: bytes,
+        source_label: str = "upload",
+        return_variant_image: bool = False,
+    ) -> tuple[OCRResult, list[str]] | tuple[OCRResult, list[str], np.ndarray | None]:
         try:
             image = decode_image_bytes(image_bytes)
         except Exception as exc:
+            if return_variant_image:
+                return OCRResult(full_text="", lines=[]), [f"invalid_image: {exc}"], None
             return OCRResult(full_text="", lines=[]), [f"invalid_image: {exc}"]
-        result, errors, selected_variant = self._run_ocr_for_image(image, source_label=source_label)
+        result, errors, selected_variant, selected_variant_image = self._run_ocr_for_image(image, source_label=source_label)
         logger.info(
             "OCR bytes completed for %s using variant=%s lines=%d errors=%d",
             source_label,
@@ -209,23 +216,25 @@ class OCRService:
             len(result.lines),
             len(errors),
         )
+        if return_variant_image:
+            return result, errors, selected_variant_image
         return result, errors
 
     # Backward-compatible alias for existing call sites/tests.
     def extract_text(self, image_bytes: bytes) -> tuple[OCRResult, list[str]]:
         return self.run_ocr_bytes(image_bytes)
 
-    def _run_ocr_for_image(self, image: np.ndarray, source_label: str) -> tuple[OCRResult, list[str], str]:
+    def _run_ocr_for_image(self, image: np.ndarray, source_label: str) -> tuple[OCRResult, list[str], str, np.ndarray | None]:
         errors: list[str] = []
 
         if not self.enabled:
-            return OCRResult(full_text="", lines=[]), errors, "disabled"
+            return OCRResult(full_text="", lines=[]), errors, "disabled", None
 
         self._ensure_engine()
         if self._engine is None:
             if self._init_error:
                 errors.append(self._init_error)
-            return OCRResult(full_text="", lines=[]), errors, "uninitialized"
+            return OCRResult(full_text="", lines=[]), errors, "uninitialized", None
 
         started = perf_counter()
         variants = build_ocr_variants(
@@ -240,6 +249,7 @@ class OCRService:
         best_result = OCRResult(full_text="", lines=[])
         best_variant_name = "none"
         best_score = -1.0
+        best_variant_image: np.ndarray | None = None
 
         for variant in variants:
             try:
@@ -259,6 +269,7 @@ class OCRService:
                 best_result = candidate
                 best_variant_name = variant.name
                 best_score = score
+                best_variant_image = variant.image.copy()
 
         elapsed_ms = (perf_counter() - started) * 1000.0
         logger.info(
@@ -273,7 +284,7 @@ class OCRService:
 
         if best_score < 0:
             errors.append("ocr_failed: no variant produced usable output")
-        return best_result, errors, best_variant_name
+        return best_result, errors, best_variant_name, best_variant_image
 
     def _run_engine_ocr(self, variant: ImageVariant) -> OCRResult:
         callable_name, raw_result = _invoke_paddleocr(self._engine, variant.image)
@@ -343,6 +354,10 @@ class OCRService:
             self._collect_lines_from_mapping(node, lines)
             return
 
+        if hasattr(node, "tolist"):
+            self._collect_lines(node.tolist(), lines)
+            return
+
         if isinstance(node, (list, tuple)):
             if self._looks_like_line_item(node):
                 line = self._line_from_item(node)
@@ -355,9 +370,12 @@ class OCRService:
 
     def _collect_lines_from_mapping(self, payload: dict[str, Any], lines: list[OCRLine]) -> None:
         # Paddle versions may expose compact arrays in dict form.
-        rec_texts = payload.get("rec_texts")
-        rec_scores = payload.get("rec_scores")
-        dt_polys = payload.get("dt_polys") or payload.get("boxes")
+        rec_texts = self._as_list(payload.get("rec_texts"))
+        rec_scores = self._as_list(payload.get("rec_scores"))
+        dt_polys_raw = payload.get("dt_polys")
+        if dt_polys_raw is None:
+            dt_polys_raw = payload.get("boxes")
+        dt_polys = self._as_list(dt_polys_raw)
         if isinstance(rec_texts, list):
             for idx, text_value in enumerate(rec_texts):
                 text = str(text_value).strip()
@@ -421,16 +439,21 @@ class OCRService:
         return None
 
     def _is_bbox_like(self, value: Any) -> bool:
-        if not isinstance(value, (list, tuple)) or len(value) < 2:
+        value = self._as_list(value)
+        if not isinstance(value, list) or len(value) < 2:
             return False
         first_point = value[0]
+        if hasattr(first_point, "tolist"):
+            first_point = first_point.tolist()
         return isinstance(first_point, (list, tuple)) and len(first_point) >= 2
 
     def _normalize_bbox(self, bbox: Any) -> list[list[float]] | None:
+        bbox = self._as_list(bbox)
         if not self._is_bbox_like(bbox):
             return None
         normalized: list[list[float]] = []
         for point in bbox:
+            point = self._as_list(point)
             if not isinstance(point, (list, tuple)) or len(point) < 2:
                 return None
             try:
@@ -438,6 +461,14 @@ class OCRService:
             except (TypeError, ValueError):
                 return None
         return normalized
+
+    def _as_list(self, value: Any) -> Any:
+        if hasattr(value, "tolist"):
+            try:
+                return value.tolist()
+            except Exception:
+                return value
+        return value
 
     def _to_confidence(self, value: Any) -> float:
         try:

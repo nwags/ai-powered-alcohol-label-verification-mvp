@@ -235,3 +235,58 @@ def test_ui_diagnostics_coverage_status_returns_404_when_disabled(client, monkey
 
     response = client.get("/ui/diagnostics/coverage/status")
     assert response.status_code == 404
+
+
+def test_ui_diagnostics_clarifies_failure_state_when_coverage_summary_exists(client, monkeypatch, tmp_path):
+    class FakeDiagnosticsService:
+        def coverage_status(self) -> dict[str, object]:
+            return {"state": "failure", "message": "Coverage generation failed with exit code 1.", "last_exit_code": 1}
+
+        def recent_logs(self, limit: int = 150) -> list[str]:
+            _ = limit
+            return []
+
+        def trigger_coverage(self) -> bool:
+            return True
+
+    coverage_dir = tmp_path / "runtime" / "coverage"
+    html_dir = coverage_dir / "html"
+    html_dir.mkdir(parents=True, exist_ok=True)
+    (coverage_dir / "coverage.json").write_text(
+        '{"totals":{"percent_covered_display":"77.00","covered_lines":77,"num_statements":100}}',
+        encoding="utf-8",
+    )
+    (html_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    fake_settings = SimpleNamespace(
+        enable_diagnostics_ui=True,
+        app_env="development",
+        log_level="INFO",
+        enable_ocr=True,
+        ocr_use_gpu=False,
+        ocr_require_local_models=True,
+        ocr_model_source="local",
+        ocr_model_root=tmp_path / "models" / "paddleocr",
+        ocr_det_model_dir=None,
+        ocr_rec_model_dir=None,
+        ocr_cls_model_dir=None,
+        ocr_max_dimension=2200,
+        ocr_max_variants=3,
+        ocr_enable_deskew=False,
+        enable_preprocessing=True,
+        enable_visualization=True,
+        storage_dir=tmp_path / "runtime",
+        sample_data_dir=tmp_path / "data",
+        coverage_dir=coverage_dir,
+        max_upload_bytes=1024,
+    )
+    monkeypatch.setattr(routes_ui, "get_settings", lambda: fake_settings)
+    app.dependency_overrides[get_dev_diagnostics_service] = lambda: FakeDiagnosticsService()
+
+    try:
+        response = client.get("/ui/diagnostics")
+        assert response.status_code == 200
+        assert "Last successful coverage summary artifacts are still available below." in response.text
+        assert "77.00" in response.text
+    finally:
+        app.dependency_overrides.pop(get_dev_diagnostics_service, None)

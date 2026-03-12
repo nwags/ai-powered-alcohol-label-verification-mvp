@@ -26,6 +26,7 @@ UI routes:
 - `POST /ui/analyze`
 - `GET /ui/batch`
 - `POST /ui/batch`
+- `GET /ui/batch/{batch_id}/record/{record_id}`
 - `GET /ui/diagnostics` (developer-only, optional)
 - `POST /ui/diagnostics/coverage` (developer-only, optional)
 - `GET /ui/diagnostics/coverage/status` (developer-only, optional)
@@ -133,6 +134,7 @@ Fields:
 - `image` required
 - `review_mode` optional (`label_only` default, `compare_application` alternate)
 - `label_type` optional (`unknown` default, `brand_label` or `other_label`)
+- `product_profile` optional (`unknown` default, `distilled_spirits`, `malt_beverage`, `wine`)
 - `application_json` optional (used in `compare_application` mode)
 
 Response:
@@ -163,6 +165,7 @@ Response:
 
 - HTTP 200
 - HTML page
+- HTTP 404 when batch UI is disabled via `ENABLE_BATCH_UI=false`
 
 This route may be omitted temporarily if batch mode is deferred
 
@@ -182,6 +185,7 @@ Fields:
 
 - `batch_review_mode` optional (`batch_label_only` default, `batch_compare_application` alternate)
 - `label_type` optional (`unknown` default, batch-level hint for all records)
+- `product_profile` optional (`unknown` default, batch-level profile hint for all records)
 - `images_archive` required in label-only mode
 - `batch_file` required in compare mode
 
@@ -189,6 +193,7 @@ Response:
 
 - HTTP 200
 - HTML batch result page
+- HTTP 404 when batch UI is disabled via `ENABLE_BATCH_UI=false`
 
 This route may be omitted temporarily if batch mode is deferred.
 
@@ -196,6 +201,23 @@ UI behavior:
 
 - `batch_label_only` mode is the default and focuses on ZIP-only label screening.
 - `batch_compare_application` mode preserves CSV/JSON + image ZIP comparison workflow.
+
+## GET /ui/batch/{batch_id}/record/{record_id}
+
+Purpose:
+
+Render a lightweight per-record detail view linked from the batch report.
+
+Response:
+
+- HTTP 200
+- HTML page
+- HTTP 404 when batch UI is disabled or batch/record artifact is unavailable
+
+Notes:
+
+- This route reads persisted batch summary artifacts for the requested record.
+- This route does not trigger re-analysis.
 
 ---
 
@@ -273,6 +295,7 @@ Required parts:
 Optional parts:
 
 - `label_type` (`unknown` default; allowed values: `unknown`, `brand_label`, `other_label`)
+- `product_profile` (`unknown` default; allowed values: `unknown`, `distilled_spirits`, `malt_beverage`, `wine`)
 
 Success response:
 
