@@ -36,6 +36,7 @@ def get_batch_service() -> BatchService:
         storage_dir=settings.storage_dir,
         max_records=settings.batch_max_records,
         max_images=settings.batch_max_images,
+        async_max_workers=settings.batch_async_max_workers,
     )
 
 

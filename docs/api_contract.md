@@ -26,6 +26,8 @@ UI routes:
 - `POST /ui/analyze`
 - `GET /ui/batch`
 - `POST /ui/batch`
+- `GET /ui/batch/{batch_id}`
+- `GET /ui/batch/{batch_id}/status`
 - `GET /ui/batch/{batch_id}/record/{record_id}`
 - `GET /ui/diagnostics` (developer-only, optional)
 - `POST /ui/diagnostics/coverage` (developer-only, optional)
@@ -191,8 +193,8 @@ Fields:
 
 Response:
 
-- HTTP 200
-- HTML batch result page
+- HTTP 303 redirect to persisted report resource (`/ui/batch/{batch_id}`) on success
+- HTTP 200 HTML form page when re-rendering with validation-safe coercions/errors
 - HTTP 404 when batch UI is disabled via `ENABLE_BATCH_UI=false`
 
 This route may be omitted temporarily if batch mode is deferred.
@@ -201,23 +203,71 @@ UI behavior:
 
 - `batch_label_only` mode is the default and focuses on ZIP-only label screening.
 - `batch_compare_application` mode preserves CSV/JSON + image ZIP comparison workflow.
+- Success path is report-first async: submit/enqueue -> redirect -> persisted report resource.
 
 ## GET /ui/batch/{batch_id}/record/{record_id}
 
 Purpose:
 
-Render a lightweight per-record detail view linked from the batch report.
+Render per-record detail using the shared result presentation model also used by
+single-label results (with batch navigation chrome).
 
 Response:
 
 - HTTP 200
 - HTML page
+- HTTP 409 when batch exists but requested record is not ready yet (`queued`/`running`)
 - HTTP 404 when batch UI is disabled or batch/record artifact is unavailable
 
 Notes:
 
 - This route reads persisted batch summary artifacts for the requested record.
 - This route does not trigger re-analysis.
+- This route must resolve artifacts from the same persisted batch storage path
+  used during batch write time.
+- Route/service code should use shared batch-artifact path helpers for both write
+  and read resolution.
+
+## GET /ui/batch/{batch_id}
+
+Purpose:
+
+Render a persisted batch report page for a queued/running/completed/failed run.
+
+Response:
+
+- HTTP 200
+- HTML page
+- HTTP 404 when batch UI is disabled or batch artifact is unavailable
+
+Notes:
+
+- This route reads stored batch artifacts from disk.
+- This route is the canonical report destination for detail-page back-links.
+- This route must not depend on transient upload-page state.
+- Persisted summary artifacts may include additive run metadata (`status`,
+  timestamps, processed counts) to support future async-status layering.
+
+## GET /ui/batch/{batch_id}/status
+
+Purpose:
+
+Return machine-readable batch run status for polling-driven report refresh.
+
+Response:
+
+- HTTP 200 JSON when batch resource exists
+- HTTP 404 when batch UI is disabled or batch artifact is unavailable
+
+Minimum fields:
+
+- `batch_id`
+- `status` (`queued`, `running`, `completed`, `failed`)
+- `total_records`
+- `processed_records`
+- `summary`
+- `errors`
+- `rows` (lightweight report rows)
 
 ---
 
@@ -302,6 +352,11 @@ Success response:
 - HTTP 200
 - `application/json`
 
+Notes:
+
+- This API endpoint remains synchronous in Phase 5.
+- Async/progressive groundwork in this phase applies to the UI batch flow (`/ui/batch...`).
+
 Response body:
 
 Must follow the single-label response model defined in `docs/data_models.md`.
@@ -316,6 +371,11 @@ Minimum top-level keys:
 - `field_results`
 - `artifacts`
 - `errors`
+
+Additive artifacts for annotation/debug may include:
+
+- `annotation` (`image_width`, `image_height`, `bbox_space`, `bbox`, `source_variant_id`, optional `field_links`)
+- `annotation_debug` (diagnostic rendering metadata)
 
 Error responses:
 
@@ -392,6 +452,7 @@ Minimum top-level keys:
 - `batch_id`
 - `summary`
 - `results`
+- `artifacts`
 - `errors`
 
 This endpoint is optional for MVP but reserved now so route names stay stable.

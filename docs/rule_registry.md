@@ -20,6 +20,9 @@ Each rule entry includes:
 
 - Evaluators collect applied `rule_id` values per field.
 - Analysis artifacts expose machine-readable `rule_trace` per field.
+- Parsed-field evidence links may reference canonical OCR evidence line IDs
+  (from normalized OCR evidence) so field extraction and rule traces can be
+  tied back to explicit OCR geometry provenance.
 - UI can append compact rule IDs in rationale text for reviewer transparency.
 - Result explanation uses `rule_trace` as canonical input and derives compact,
   reviewer-facing summaries from the same metadata.

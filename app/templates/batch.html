@@ -4,13 +4,13 @@
 <section class="card">
   <h2>Batch Label Review</h2>
   <p class="help-text">Run multi-label review in either Label-Only mode (default) or Compare mode.</p>
-  <p class="field-note">Batch runs are synchronous in this MVP and can take time on CPU for larger uploads.</p>
+  <p class="field-note">Batch runs are queued and processed in the background in this MVP phase; larger uploads can take time on CPU.</p>
 
   {% if error_message %}
   <div class="alert alert-error">{{ error_message }}</div>
   {% endif %}
 
-  <form method="post" action="/ui/batch" enctype="multipart/form-data" class="review-form">
+  <form method="post" action="/ui/batch" enctype="multipart/form-data" class="review-form" id="batch-review-form">
     <fieldset class="mode-selector" id="batch-mode-selector">
       <legend>Batch Review Mode</legend>
       {% for value, label in batch_review_mode_options %}
@@ -67,7 +67,11 @@
       <p class="field-note">ZIP should contain label images. In compare mode, filenames must match `image_filename` values.</p>
     </div>
     <div class="form-actions">
-      <button type="submit" class="button button-primary">Run Batch Analysis</button>
+      <button type="submit" class="button button-primary" id="batch-submit-btn">Run Batch Analysis</button>
+      <div id="batch-running-state" class="batch-running-state" role="status" aria-live="polite" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span><strong>Batch analysis has been submitted...</strong> You will be redirected to a live report while processing continues.</span>
+      </div>
     </div>
   </form>
 </section>
@@ -77,25 +81,39 @@
 </section>
 
 {% if batch_response %}
-<section class="card">
+<section
+  class="card"
+  id="batch-status-shell"
+  data-batch-id="{{ batch_id }}"
+  data-poll-url="/ui/batch/{{ batch_id }}/status"
+  data-poll-interval-ms="{{ batch_poll_interval_ms }}"
+>
   <h3>Batch Summary</h3>
   <p class="help-text">Batch ID: <code>{{ batch_response.batch_id }}</code></p>
-  {% if batch_elapsed_ms is not none %}
-  <p class="help-text"><strong>Mode:</strong> {{ batch_mode_used }} | <strong>Elapsed:</strong> {{ batch_elapsed_ms }} ms | <strong>Processed:</strong> {{ processed_count }}</p>
+  {% if batch_status %}
+  <p class="help-text"><strong>Status:</strong> <span id="batch-status-badge" class="badge badge-{{ batch_status }}">{{ batch_status }}</span></p>
   {% endif %}
+  {% if batch_id %}
+  <p class="help-text">Report URL: <code>/ui/batch/{{ batch_id }}</code></p>
+  {% endif %}
+  <p class="help-text">
+    <strong>Mode:</strong> {{ batch_mode_used }}
+    | <strong>Elapsed:</strong> <span id="batch-elapsed-ms">{{ batch_elapsed_ms if batch_elapsed_ms is not none else 0 }}</span> ms
+    | <strong>Processed:</strong> <span id="batch-processed-count">{{ processed_count if processed_count is not none else 0 }}</span>
+  </p>
   <div class="two-col">
-    {% if batch_mode_used == 'batch_label_only' and batch_display_summary %}
-    <p><strong>Pass:</strong> {{ batch_display_summary.pass }}</p>
-    <p><strong>Review:</strong> {{ batch_display_summary.review }}</p>
-    <p><strong>Fail:</strong> {{ batch_display_summary.fail }}</p>
+    {% if batch_mode_used == 'batch_label_only' %}
+    <p><strong>Pass:</strong> <span id="batch-summary-pass">{{ batch_display_summary.pass if batch_display_summary else 0 }}</span></p>
+    <p><strong>Review:</strong> <span id="batch-summary-review-label">{{ batch_display_summary.review if batch_display_summary else 0 }}</span></p>
+    <p><strong>Fail:</strong> <span id="batch-summary-fail">{{ batch_display_summary.fail if batch_display_summary else 0 }}</span></p>
     {% endif %}
-    <p><strong>Total:</strong> {{ batch_response.summary.total }}</p>
-    <p><strong>Match:</strong> {{ batch_response.summary.match }}</p>
-    <p><strong>Normalized:</strong> {{ batch_response.summary.normalized_match }}</p>
-    <p><strong>Mismatch:</strong> {{ batch_response.summary.mismatch }}</p>
-    <p><strong>Review:</strong> {{ batch_response.summary.review }}</p>
+    <p><strong>Total:</strong> <span id="batch-summary-total">{{ batch_response.summary.total }}</span></p>
+    <p><strong>Match:</strong> <span id="batch-summary-match">{{ batch_response.summary.match }}</span></p>
+    <p><strong>Normalized:</strong> <span id="batch-summary-normalized">{{ batch_response.summary.normalized_match }}</span></p>
+    <p><strong>Mismatch:</strong> <span id="batch-summary-mismatch">{{ batch_response.summary.mismatch }}</span></p>
+    <p><strong>Review:</strong> <span id="batch-summary-review">{{ batch_response.summary.review }}</span></p>
   </div>
-  <div class="form-actions">
+  <div class="form-actions" id="batch-download-actions" {% if batch_status != 'completed' %}hidden{% endif %}>
     {% if batch_response.artifacts.summary_json_url %}
     <a class="button button-secondary" href="{{ batch_response.artifacts.summary_json_url }}" download>Download JSON Summary</a>
     {% endif %}
@@ -105,44 +123,88 @@
   </div>
 </section>
 
-{% if batch_response.errors %}
-<section class="card">
+<section class="card" id="batch-errors-card" {% if not batch_response.errors %}hidden{% endif %}>
   <h3>Batch Errors</h3>
-  <ul>
+  <ul id="batch-errors-list">
     {% for error in batch_response.errors %}
     <li>{{ error }}</li>
     {% endfor %}
   </ul>
 </section>
-{% endif %}
 
 <section class="card">
   <h3>Record Results</h3>
+  <p
+    id="batch-results-empty"
+    class="help-text"
+    {% if batch_display_rows %}hidden{% endif %}
+  >
+    {% if batch_status in ['queued', 'running'] %}
+    Batch is in progress. Record rows will appear as processing completes.
+    {% elif batch_status == 'failed' %}
+    Batch run failed before producing complete record rows.
+    {% else %}
+    No record results are available yet.
+    {% endif %}
+  </p>
   <div class="table-wrap">
-    <table>
+    <table class="batch-results-table">
+      <colgroup>
+        <col class="col-details">
+        <col class="col-record-id">
+        <col class="col-image">
+        <col class="col-filename">
+        <col class="col-overall">
+        <col class="col-internal">
+        <col class="col-reason">
+        <col class="col-timing">
+      </colgroup>
       <thead>
         <tr>
-          <th>Details</th>
-          <th>Record ID</th>
-          <th>Image</th>
+          <th class="batch-col-details">Details</th>
+          <th class="batch-col-record-id">Record ID</th>
+          <th class="batch-col-image">Image</th>
           <th>Filename</th>
           <th>Overall Result</th>
           <th>Internal Status</th>
           <th>Main Reason</th>
-          <th>Timing (ms)</th>
+          <th class="batch-col-timing"><span class="th-stack">Timing <span class="th-sub">(ms)</span></span></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="batch-results-body">
         {% for row in batch_display_rows %}
+        {% set image_name = (row.image_filename or "") | lower %}
+        {% set is_tiff = image_name.endswith('.tif') or image_name.endswith('.tiff') %}
         <tr>
-          <td><a href="{{ row.detail_url }}">View</a></td>
-          <td>{{ row.record_id }}</td>
-          <td>{% if row.image_filename %}available{% else %}-{% endif %}</td>
+          <td class="batch-col-details"><a href="{{ row.detail_url }}">View</a></td>
+          <td class="batch-col-record-id">{{ row.record_id }}</td>
+          <td class="batch-col-image">
+            {% if row.image_url %}
+              {% if is_tiff %}
+              <div class="batch-preview-fallback">
+                <span class="file-icon" title="TIFF preview unsupported">TIFF</span>
+                <span class="help-text">Preview unavailable</span>
+                <a href="{{ row.image_url }}" target="_blank" rel="noopener noreferrer">Open File</a>
+              </div>
+              {% else %}
+              <img
+                src="{{ row.image_url }}"
+                alt="Thumbnail for {{ row.record_id }}"
+                class="batch-thumb js-lightbox-image"
+                data-lightbox-title="Batch Record {{ row.record_id }} Image"
+              >
+              {% endif %}
+            {% elif row.image_filename %}
+            <span class="file-icon" title="Image file name available">IMG</span>
+            {% else %}
+            -
+            {% endif %}
+          </td>
           <td>{{ row.image_filename or "-" }}</td>
           <td><span class="badge badge-{{ row.display_status }}">{{ row.display_status }}</span></td>
           <td><span class="badge badge-{{ row.internal_status }}">{{ row.internal_status }}</span></td>
           <td>{{ row.main_reason or "-" }}</td>
-          <td>{{ row.timing_ms }}</td>
+          <td class="batch-col-timing">{{ row.timing_ms }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -150,4 +212,13 @@
   </div>
 </section>
 {% endif %}
+
+<div id="image-lightbox" class="image-lightbox" hidden aria-hidden="true">
+  <div class="image-lightbox-backdrop" data-lightbox-close></div>
+  <div class="image-lightbox-content" role="dialog" aria-modal="true" aria-label="Expanded result image">
+    <button type="button" class="image-lightbox-close" data-lightbox-close aria-label="Close image viewer">Close</button>
+    <h4 id="image-lightbox-title"></h4>
+    <img id="image-lightbox-image" alt="Expanded result image">
+  </div>
+</div>
 {% endblock %}

@@ -294,6 +294,41 @@ Batch mode is optional for MVP, but if implemented it should reuse the single-la
   - `label_type` (`selected_hint`, `detected_label_type`, `effective_label_type`, `confidence`, `evidence`)
 - `rule_trace`
   - per-field list of applied rule metadata (`rule_id`, profile scope, citation metadata, rationale)
+- `annotation`
+  - `image_width` (int)
+  - `image_height` (int)
+  - `bbox_space` (`render_pixels`/`normalized`/etc.)
+  - `bbox` (list of rendered bbox entries with line metadata)
+  - `source_variant_id` (OCR image variant identifier, nullable when unavailable)
+  - optional `field_links` (field name to OCR line-index list)
+- `annotation_debug`
+  - additive debug metadata for alignment diagnostics
+  - may include:
+    - `source_variant_id` context
+    - `canonical_evidence_count`
+    - `active_evidence_count`
+    - `evidence_ids_used`
+    - rendered/skipped counters and reasons
+
+Annotation rendering behavior:
+
+- boxes are rendered only from canonical evidence lines that match `source_variant_id`
+- when provenance is missing or contradictory, annotation bbox list may be empty and
+  debug metadata explains skipped reasons
+- `ocr_evidence` (optional, additive)
+  - normalized evidence lines with explicit provenance:
+    - `id`
+    - `text`
+    - `confidence`
+    - `bbox`
+    - `bbox_space`
+    - `image_variant_id`
+    - `source_backend`
+- `parsed_field_evidence` (optional, additive)
+  - per parsed field evidence linkage:
+    - `supporting_evidence_ids`
+    - `confidence_source`
+    - `confidence_value`
 
 ---
 
@@ -587,10 +622,69 @@ If batch mode is implemented, recommended response shape:
     {
       "record_id": "001",
       "request_id": "req-001",
-      "overall_status": "review"
+      "overall_status": "review",
+      "image_filename": "label_001.jpg",
+      "image_url": "/storage/outputs/batch/batch-abc123/images/label_001.jpg"
     }
   ],
+  "artifacts": {
+    "summary_json_url": "/storage/outputs/batch/batch-abc123/summary.json",
+    "summary_csv_url": "/storage/outputs/batch/batch-abc123/summary.csv",
+    "report_url": "/ui/batch/batch-abc123"
+  },
   "errors": []
+}
+```
+
+Persisted batch summary artifact (`summary.json`) may include additive run metadata:
+
+- `status` (`queued`, `running`, `completed`, `failed`)
+- `created_at`
+- `started_at`
+- `completed_at`
+- `total_records`
+- `processed_records`
+
+For async UI batch flow, `results` and `record_details` may be partial while status is
+`queued` or `running`, and become complete on `completed`.
+
+---
+
+# Batch Status Polling Response (UI)
+
+Endpoint:
+
+`GET /ui/batch/{batch_id}/status`
+
+Recommended shape:
+
+```json
+{
+  "batch_id": "batch-abc123",
+  "status": "running",
+  "created_at": "2026-03-13T15:11:00.123456+00:00",
+  "started_at": "2026-03-13T15:11:01.234567+00:00",
+  "completed_at": null,
+  "total_records": 10,
+  "processed_records": 4,
+  "elapsed_ms": 2180,
+  "summary": {
+    "total": 10,
+    "match": 1,
+    "normalized_match": 1,
+    "mismatch": 0,
+    "review": 2
+  },
+  "errors": [],
+  "report_url": "/ui/batch/batch-abc123",
+  "rows": [
+    {
+      "record_id": "img-001",
+      "display_status": "review",
+      "internal_status": "review",
+      "detail_url": "/ui/batch/batch-abc123/record/img-001"
+    }
+  ]
 }
 ```
 

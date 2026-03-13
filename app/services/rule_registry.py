@@ -167,7 +167,7 @@ def build_rule_trace(rule_ids_by_field: dict[str, list[str]]) -> dict[str, Any]:
 def short_rule_tags(rule_ids: list[str]) -> str:
     if not rule_ids:
         return ""
-    return " [rules: " + ", ".join(rule_ids) + "]"
+    return " [" + ", ".join(rule_ids) + "]"
 
 
 def summarize_rule(rule_id: str) -> dict[str, str] | None:

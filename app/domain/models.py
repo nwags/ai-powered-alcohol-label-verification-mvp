@@ -29,6 +29,16 @@ class OCRLine(BaseModel):
     bbox: list[list[float]]
 
 
+class OCREvidenceLine(BaseModel):
+    id: str
+    text: str
+    confidence: float
+    bbox: list[list[float]]
+    bbox_space: str
+    image_variant_id: str
+    source_backend: str
+
+
 class OCRResult(BaseModel):
     full_text: str
     lines: list[OCRLine] = Field(default_factory=list)
@@ -90,6 +100,7 @@ class BatchResult(BaseModel):
     request_id: str
     overall_status: OverallStatus
     image_filename: str | None = None
+    image_url: str | None = None
     main_reason: str | None = None
     timing_ms: int = 0
 
@@ -106,7 +117,7 @@ class BatchResponse(BaseModel):
     batch_id: str
     summary: BatchSummary
     results: list[BatchResult] = Field(default_factory=list)
-    artifacts: dict[str, str] = Field(default_factory=dict)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
 
 

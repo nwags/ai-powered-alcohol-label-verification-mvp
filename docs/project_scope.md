@@ -48,6 +48,14 @@ The system:
 3. compares parsed values with application data
 4. displays results
 
+For batch workflows in this MVP phase, the UX is report-first:
+
+- submit batch and enqueue background processing
+- land on a persisted batch report URL immediately
+- observe queued/running/completed/failed status with progressive report updates
+- drill into per-record details and return to the same report
+- persist report/detail artifacts as stable resources under the batch ID
+
 ---
 
 # Required Fields
@@ -61,6 +69,8 @@ The prototype must verify the following:
 - Bottler / Producer
 - Country of Origin (imports)
 - Government Warning Statement
+
+These seven fields are shared across single-label compare mode and batch compare mode.
 
 ---
 

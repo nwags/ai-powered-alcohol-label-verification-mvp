@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 10 * 1024 * 1024
     batch_max_records: int = 200
     batch_max_images: int = 500
+    batch_async_max_workers: int = 1
+    batch_status_poll_interval_ms: int = 2000
 
 
 @lru_cache(maxsize=1)

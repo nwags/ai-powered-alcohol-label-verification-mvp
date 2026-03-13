@@ -1,16 +1,17 @@
-import json
 from pathlib import Path
-import time
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.dependencies import get_batch_service, get_ocr_service
 from app.domain.enums import LabelType, ProductProfile
 from app.domain.models import BatchResponse
+from app.services.result_presenter import build_batch_detail_result_view, build_batch_report_rows
 from app.services.batch_service import BatchService
+from app.services.batch_artifacts import batch_detail_url
 from app.services.inference_service import coerce_product_profile
 from app.services.matching_service import coerce_label_type
 
@@ -34,14 +35,15 @@ PRODUCT_PROFILE_LABELS = {
     ProductProfile.MALT_BEVERAGE: "Malt Beverage",
     ProductProfile.WINE: "Wine",
 }
-LABEL_ONLY_UI_STATUS_MAP = {
-    "match": "pass",
-    "normalized_match": "pass",
-    "review": "review",
-    "mismatch": "fail",
+FIELD_LABELS = {
+    "brand_name": "Brand Name",
+    "class_type": "Class / Type",
+    "alcohol_content": "Alcohol Content",
+    "net_contents": "Net Contents",
+    "bottler_producer": "Bottler / Producer",
+    "country_of_origin": "Country of Origin",
+    "government_warning": "Government Warning",
 }
-
-
 @router.get("/ui/batch")
 def batch_page(request: Request):
     settings = get_settings()
@@ -53,22 +55,20 @@ def batch_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="batch.html",
-        context={
-            "title": "Batch Analysis",
-            "batch_response": None,
-            "error_message": None,
-            "batch_review_mode": batch_mode,
-            "label_type": label_type.value,
-            "product_profile": product_profile.value,
-            "batch_review_mode_options": _batch_review_mode_options(settings),
-            "label_type_options": _label_type_options(settings),
-            "product_profile_options": _product_profile_options(settings),
-            "batch_elapsed_ms": None,
-            "batch_mode_used": None,
-            "processed_count": None,
-            "batch_display_rows": [],
-            "batch_display_summary": None,
-        },
+        context=_batch_template_context(
+            settings=settings,
+            batch_response=None,
+            error_message=None,
+            batch_review_mode=batch_mode,
+            label_type=label_type.value,
+            product_profile=product_profile.value,
+            batch_elapsed_ms=None,
+            batch_mode_used=None,
+            processed_count=None,
+            batch_display_rows=[],
+            batch_display_summary=None,
+            batch_id=None,
+        ),
     )
 
 
@@ -89,9 +89,8 @@ async def batch_page_submit(
     batch_review_mode = _coerce_batch_mode(batch_review_mode, settings)
     resolved_label_type = _coerce_label_type_allowed(label_type, settings)
     resolved_product_profile = _coerce_product_profile_allowed(product_profile, settings)
-    started = time.perf_counter()
     try:
-        response = await _run_batch_ui(
+        batch_id = await _run_batch_ui(
             batch_review_mode,
             batch_file,
             images_archive,
@@ -104,77 +103,113 @@ async def batch_page_submit(
         return templates.TemplateResponse(
             request=request,
             name="batch.html",
-            context={
-                "title": "Batch Analysis",
-                "batch_response": None,
-                "error_message": str(exc),
-                "batch_review_mode": batch_review_mode,
-                "label_type": resolved_label_type.value,
-                "product_profile": resolved_product_profile.value,
-                "batch_review_mode_options": _batch_review_mode_options(settings),
-                "label_type_options": _label_type_options(settings),
-                "product_profile_options": _product_profile_options(settings),
-                "batch_elapsed_ms": None,
-                "batch_mode_used": batch_review_mode,
-                "processed_count": None,
-                "batch_display_rows": [],
-                "batch_display_summary": None,
-            },
+            context=_batch_template_context(
+                settings=settings,
+                batch_response=None,
+                error_message=str(exc),
+                batch_review_mode=batch_review_mode,
+                label_type=resolved_label_type.value,
+                product_profile=resolved_product_profile.value,
+                batch_elapsed_ms=None,
+                batch_mode_used=batch_review_mode,
+                processed_count=None,
+                batch_display_rows=[],
+                batch_display_summary=None,
+                batch_id=None,
+            ),
             status_code=422,
         )
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-    display_rows = _build_display_rows(response, batch_review_mode)
-    display_summary = _build_display_summary(response, batch_review_mode, display_rows)
-
-    return templates.TemplateResponse(
-        request=request,
-        name="batch.html",
-        context={
-            "title": "Batch Analysis",
-            "batch_response": response,
-            "error_message": None,
-            "batch_review_mode": batch_review_mode,
-            "label_type": resolved_label_type.value,
-            "product_profile": resolved_product_profile.value,
-            "batch_review_mode_options": _batch_review_mode_options(settings),
-            "label_type_options": _label_type_options(settings),
-            "product_profile_options": _product_profile_options(settings),
-            "batch_elapsed_ms": elapsed_ms,
-            "batch_mode_used": batch_review_mode,
-            "processed_count": len(response.results),
-            "batch_display_rows": display_rows,
-            "batch_display_summary": display_summary,
-        },
-    )
+    return RedirectResponse(url=f"/ui/batch/{batch_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/ui/batch/{batch_id}/record/{record_id}")
-def batch_record_detail(request: Request, batch_id: str, record_id: str):
+@router.get("/ui/batch/{batch_id}")
+def batch_report_page(request: Request, batch_id: str, batch_service: BatchService = Depends(get_batch_service)):
     settings = get_settings()
     if not settings.enable_batch_ui:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    summary_path = Path(settings.storage_dir) / "outputs" / "batch" / batch_id / "summary.json"
-    if not summary_path.exists():
+    payload = batch_service.load_summary_payload(batch_id=batch_id)
+    if payload is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch record not found")
-    try:
-        payload = json.loads(summary_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    response = BatchResponse.model_validate(
+        {
+            "batch_id": payload.get("batch_id"),
+            "summary": payload.get("summary", {}),
+            "results": payload.get("results", []),
+            "errors": payload.get("errors", []),
+            "artifacts": payload.get("artifacts", {}),
+        }
+    )
+    batch_mode = str(payload.get("batch_review_mode", _default_batch_mode(settings)))
+    label_type = str(payload.get("label_type", _default_label_type(settings).value))
+    product_profile = str(payload.get("product_profile", _default_product_profile(settings).value))
+    display_rows = _build_display_rows(response, batch_mode)
+    display_summary = _build_display_summary(response, batch_mode, display_rows)
+    elapsed_ms = payload.get("elapsed_ms")
+    processed_count = int(payload.get("processed_records") or len(response.results))
+    batch_status = str(payload.get("status", "queued"))
+    return templates.TemplateResponse(
+        request=request,
+        name="batch.html",
+        context=_batch_template_context(
+            settings=settings,
+            batch_response=response,
+            error_message=None,
+            batch_review_mode=batch_mode,
+            label_type=label_type,
+            product_profile=product_profile,
+            batch_elapsed_ms=elapsed_ms if isinstance(elapsed_ms, int) else None,
+            batch_mode_used=batch_mode,
+            processed_count=processed_count,
+            batch_display_rows=display_rows,
+            batch_display_summary=display_summary,
+            batch_id=batch_id,
+            batch_status=batch_status,
+            batch_poll_interval_ms=int(getattr(settings, "batch_status_poll_interval_ms", 2000)),
+        ),
+    )
+
+
+@router.get("/ui/batch/{batch_id}/status")
+def batch_status_page(batch_id: str, batch_service: BatchService = Depends(get_batch_service)):
+    settings = get_settings()
+    if not settings.enable_batch_ui:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    payload = batch_service.load_status_payload(batch_id=batch_id)
+    if payload is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch record not found")
-    results = payload.get("results", [])
-    if not isinstance(results, list):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch record not found")
-    row = next((item for item in results if isinstance(item, dict) and str(item.get("record_id")) == record_id), None)
+    return JSONResponse(content=payload)
+
+
+@router.get("/ui/batch/{batch_id}/record/{record_id}")
+def batch_record_detail(
+    request: Request,
+    batch_id: str,
+    record_id: str,
+    batch_service: BatchService = Depends(get_batch_service),
+):
+    settings = get_settings()
+    if not settings.enable_batch_ui:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    row = batch_service.load_record_detail(batch_id=batch_id, record_id=record_id)
     if row is None:
+        summary_payload = batch_service.load_summary_payload(batch_id=batch_id)
+        if summary_payload is not None and str(summary_payload.get("status", "queued")) in {"queued", "running"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Batch record is not ready yet")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch record not found")
+    result_view = build_batch_detail_result_view(
+        batch_id=batch_id,
+        record_id=record_id,
+        row=row,
+        field_labels=FIELD_LABELS,
+        label_type_labels=LABEL_TYPE_LABELS,
+        product_profile_labels=PRODUCT_PROFILE_LABELS,
+    )
     return templates.TemplateResponse(
         request=request,
         name="batch_record_detail.html",
         context={
             "title": f"Batch Record {record_id}",
-            "batch_id": batch_id,
-            "record_id": record_id,
-            "row": row,
-            "overall_status_display": _label_only_ui_status(str(row.get("overall_status", "review"))),
+            "result_view": result_view,
         },
     )
 
@@ -255,11 +290,11 @@ async def _run_batch_ui(
     batch_service: BatchService,
     label_type: LabelType,
     product_profile: ProductProfile,
-) -> BatchResponse:
+) -> str:
     if batch_review_mode == BATCH_MODE_COMPARE:
         if batch_file is None:
             raise ValueError("Batch file is required in Compare to Application Data mode.")
-        return await _run_batch(batch_file, images_archive, ocr_service, batch_service, label_type, product_profile)
+        return await _enqueue_batch(batch_file, images_archive, ocr_service, batch_service, label_type, product_profile)
 
     if images_archive is None:
         raise ValueError("Image ZIP archive is required in Label-Only Review mode.")
@@ -276,7 +311,49 @@ async def _run_batch_ui(
     if len(archive_bytes) > settings.max_upload_bytes:
         raise ValueError(f"Image ZIP exceeds upload size limit of {settings.max_upload_bytes} bytes.")
 
-    return batch_service.analyze_label_only(
+    return batch_service.enqueue_label_only(
+        images_archive_bytes=archive_bytes,
+        ocr_service=ocr_service,
+        label_type=label_type,
+        product_profile=product_profile,
+    )
+
+
+async def _enqueue_batch(
+    batch_file: UploadFile,
+    images_archive: UploadFile | None,
+    ocr_service: "OCRService",
+    batch_service: BatchService,
+    label_type: LabelType,
+    product_profile: ProductProfile,
+) -> str:
+    batch_filename = batch_file.filename or ""
+    if not batch_filename:
+        raise ValueError("Batch file is required.")
+    if Path(batch_filename).suffix.lower() not in {".csv", ".json"}:
+        raise ValueError("Batch file must be .csv or .json.")
+
+    batch_bytes = await batch_file.read()
+    if not batch_bytes:
+        raise ValueError("Batch file is empty.")
+    settings = get_settings()
+    if len(batch_bytes) > settings.max_upload_bytes:
+        raise ValueError(f"Batch file exceeds upload size limit of {settings.max_upload_bytes} bytes.")
+
+    archive_bytes: bytes | None = None
+    if images_archive is not None:
+        archive_name = images_archive.filename or ""
+        if archive_name and Path(archive_name).suffix.lower() != ".zip":
+            raise ValueError("images_archive must be a .zip file.")
+        archive_bytes = await images_archive.read()
+        if not archive_bytes:
+            raise ValueError("Image ZIP archive was provided but empty.")
+        if len(archive_bytes) > settings.max_upload_bytes:
+            raise ValueError(f"Image ZIP exceeds upload size limit of {settings.max_upload_bytes} bytes.")
+
+    return batch_service.enqueue_compare(
+        batch_file_bytes=batch_bytes,
+        batch_filename=batch_filename,
         images_archive_bytes=archive_bytes,
         ocr_service=ocr_service,
         label_type=label_type,
@@ -393,25 +470,9 @@ def _parse_allowed_csv(raw_value: object, valid_order: list[str]) -> list[str]:
 
 
 def _build_display_rows(response: BatchResponse, batch_mode: str) -> list[dict[str, object]]:
-    output: list[dict[str, object]] = []
-    for row in response.results:
-        internal_status = row.overall_status.value
-        if batch_mode == BATCH_MODE_LABEL_ONLY:
-            display_status = _label_only_ui_status(internal_status)
-        else:
-            display_status = internal_status
-        output.append(
-            {
-                "record_id": row.record_id,
-                "request_id": row.request_id,
-                "image_filename": row.image_filename,
-                "main_reason": row.main_reason,
-                "timing_ms": row.timing_ms,
-                "internal_status": internal_status,
-                "display_status": display_status,
-                "detail_url": f"/ui/batch/{response.batch_id}/record/{row.record_id}",
-            }
-        )
+    output = build_batch_report_rows(response.results, batch_mode)
+    for row in output:
+        row["detail_url"] = batch_detail_url(response.batch_id, str(row["record_id"]))
     return output
 
 
@@ -435,5 +496,39 @@ def _build_display_summary(
     return counts
 
 
-def _label_only_ui_status(internal_status: str) -> str:
-    return LABEL_ONLY_UI_STATUS_MAP.get(internal_status, "review")
+def _batch_template_context(
+    *,
+    settings: object,
+    batch_response: BatchResponse | None,
+    error_message: str | None,
+    batch_review_mode: str,
+    label_type: str,
+    product_profile: str,
+    batch_elapsed_ms: int | None,
+    batch_mode_used: str | None,
+    processed_count: int | None,
+    batch_display_rows: list[dict[str, object]],
+    batch_display_summary: dict[str, int] | None,
+    batch_id: str | None,
+    batch_status: str | None = None,
+    batch_poll_interval_ms: int = 2000,
+) -> dict[str, object]:
+    return {
+        "title": "Batch Analysis",
+        "batch_response": batch_response,
+        "error_message": error_message,
+        "batch_review_mode": batch_review_mode,
+        "label_type": label_type,
+        "product_profile": product_profile,
+        "batch_review_mode_options": _batch_review_mode_options(settings),
+        "label_type_options": _label_type_options(settings),
+        "product_profile_options": _product_profile_options(settings),
+        "batch_elapsed_ms": batch_elapsed_ms,
+        "batch_mode_used": batch_mode_used,
+        "processed_count": processed_count,
+        "batch_display_rows": batch_display_rows,
+        "batch_display_summary": batch_display_summary,
+        "batch_id": batch_id,
+        "batch_status": batch_status,
+        "batch_poll_interval_ms": batch_poll_interval_ms,
+    }

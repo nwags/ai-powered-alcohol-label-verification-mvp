@@ -1,0 +1,179 @@
+<section class="card">
+  <div class="result-head">
+    <h2>{{ result_view.page_heading }}</h2>
+    <span class="badge badge-{{ result_view.badge.class }}">{{ result_view.badge.label }}</span>
+  </div>
+  {% if result_view.page_meta.batch_id %}
+  <p class="help-text">Batch ID: <code>{{ result_view.page_meta.batch_id }}</code> | Record ID: <code>{{ result_view.page_meta.record_id }}</code></p>
+  {% endif %}
+  <p class="help-text"><strong>Recommendation:</strong> {{ result_view.overall_recommendation }}</p>
+  <p class="help-text"><strong>Why this result:</strong> {{ result_view.ui_overall_reason }}</p>
+  <p class="help-text"><strong>Evidence Confidence:</strong> {{ result_view.overall_evidence_confidence }}</p>
+  <p class="help-text"><strong>Product Profile:</strong> {{ result_view.product_profile_display }} (hint: {{ result_view.product_profile_hint_display }}, detected: {{ result_view.detected_product_profile_display }})</p>
+  <p class="help-text"><strong>Label Type:</strong> {{ result_view.label_type_display }} (hint: {{ result_view.label_type_hint_display }}, detected: {{ result_view.detected_label_type_display }})</p>
+  <p class="help-text">
+    <strong>Inference Confidence:</strong>
+    product profile={{ result_view.inference_payload.product_profile.confidence if result_view.inference_payload.product_profile.confidence is not none else "n/a" }},
+    label type={{ result_view.inference_payload.label_type.confidence if result_view.inference_payload.label_type.confidence is not none else "n/a" }}
+  </p>
+  <p class="help-text">Request ID: <code>{{ result_view.request_id }}</code> | Processing time: <strong>{{ result_view.timing_ms }} ms</strong></p>
+  <p class="help-text">Uploaded file: <code>{{ result_view.uploaded_filename }}</code></p>
+</section>
+
+<section class="card">
+  <h3>Why This Result</h3>
+  <p class="help-text">{{ result_view.priority_summary }}</p>
+  {% if result_view.non_priority_notice %}
+  <p class="field-note">{{ result_view.non_priority_notice }}</p>
+  {% endif %}
+  {% if result_view.top_contributing_fields %}
+  <ul>
+    {% for item in result_view.top_contributing_fields %}
+    <li><strong>{{ item.label }}</strong> ({{ item.status }}): {{ item.reason }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if result_view.top_rules %}
+  <h4>Top Applied Rules</h4>
+  <ul>
+    {% for rule in result_view.top_rules %}
+    <li><strong>{{ rule.rule_id }}</strong> — {{ rule.title }}: {{ rule.summary }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>Field Comparison</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          {% if result_view.review_mode == "compare_application" %}
+          <th>Submitted</th>
+          {% endif %}
+          <th>Detected</th>
+          <th>Status</th>
+          <th>Evidence Confidence</th>
+          <th>Rule Scope</th>
+          <th>Rationale</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result_view.field_rows %}
+        {% set confidence = row.evidence_confidence or "unknown" %}
+        <tr>
+          <td>{{ row.label }}</td>
+          {% if result_view.review_mode == "compare_application" %}
+          <td>{{ row.submitted_value or "-" }}</td>
+          {% endif %}
+          <td>{{ row.detected_value or "-" }}</td>
+          <td><span class="badge badge-{{ row.status }}">{{ row.status }}</span></td>
+          <td><span class="badge badge-confidence-{{ confidence }}">{{ confidence }}</span></td>
+          <td>{% if row.is_priority %}priority{% else %}secondary{% endif %}</td>
+          <td>{{ row.notes or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if result_view.rule_trace_details %}
+<section class="card">
+  <details>
+    <summary><strong>Rule Trace Details</strong></summary>
+    {% for item in result_view.rule_trace_details %}
+    <h4>{{ item.field_name }}</h4>
+    <ul>
+      {% for entry in item.entries %}
+      <li>
+        <strong>{{ entry.rule_id }}</strong> — {{ entry.source_title }} ({{ entry.source_type }})<br>
+        {{ entry.rationale }}<br>
+        <code>{{ entry.source_ref }}</code>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </details>
+</section>
+{% endif %}
+
+{% if result_view.review_reasons %}
+<section class="card">
+  <h3>Review Reasons</h3>
+  <ul>
+    {% for reason in result_view.review_reasons %}
+    <li>{{ reason }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3>Label Images</h3>
+  <div class="image-grid">
+    <div>
+      <h4>Uploaded Label</h4>
+      {% if result_view.uploaded_image_url %}
+      <img src="{{ result_view.uploaded_image_url }}" alt="Uploaded label image" class="result-image js-lightbox-image" data-lightbox-title="Uploaded Label">
+      {% else %}
+      <p class="help-text">No uploaded image available for this run.</p>
+      {% endif %}
+    </div>
+    <div>
+      <h4>Annotated OCR Evidence</h4>
+      {% if result_view.annotated_image_url %}
+      <img src="{{ result_view.annotated_image_url }}" alt="Annotated OCR image" class="result-image js-lightbox-image" data-lightbox-title="Annotated OCR Evidence">
+      {% else %}
+      <p class="help-text">No annotated image available for this run.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h3>Extracted OCR Text</h3>
+  <textarea rows="12" readonly>{{ result_view.ocr_full_text }}</textarea>
+</section>
+
+{% if result_view.ocr_errors %}
+<section class="card">
+  <h3>Processing Notes</h3>
+  <ul>
+    {% for error in result_view.ocr_errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if result_view.annotation_debug %}
+<section class="card">
+  <details>
+    <summary><strong>Annotation Debug Metadata</strong></summary>
+    <pre>{{ result_view.annotation_debug | tojson(indent=2) }}</pre>
+    {% if result_view.annotation %}
+    <p class="field-note">
+      source_variant_id=<code>{{ result_view.annotation.source_variant_id }}</code>,
+      bbox_space=<code>{{ result_view.annotation.bbox_space }}</code>,
+      image=<code>{{ result_view.annotation.image_width }}x{{ result_view.annotation.image_height }}</code>
+    </p>
+    {% endif %}
+  </details>
+</section>
+{% endif %}
+
+<section class="card">
+  <a href="{{ result_view.navigation.url }}" class="button button-secondary">{{ result_view.navigation.label }}</a>
+</section>
+
+<div id="image-lightbox" class="image-lightbox" hidden aria-hidden="true">
+  <div class="image-lightbox-backdrop" data-lightbox-close></div>
+  <div class="image-lightbox-content" role="dialog" aria-modal="true" aria-label="Expanded result image">
+    <button type="button" class="image-lightbox-close" data-lightbox-close aria-label="Close image viewer">Close</button>
+    <h4 id="image-lightbox-title"></h4>
+    <img id="image-lightbox-image" alt="Expanded result image">
+  </div>
+</div>

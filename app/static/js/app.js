@@ -10,11 +10,15 @@
   const modeOptionElements = document.querySelectorAll("#review-mode-selector .mode-option");
   const batchModeInputs = document.querySelectorAll('input[name="batch_review_mode"]');
   const batchModeOptionElements = document.querySelectorAll("#batch-mode-selector .mode-option");
+  const batchForm = document.getElementById("batch-review-form");
+  const batchSubmitBtn = document.getElementById("batch-submit-btn");
+  const batchRunningState = document.getElementById("batch-running-state");
   const batchCompareInputs = document.getElementById("batch-compare-inputs");
   const batchHelpLabelOnly = document.getElementById("batch-help-label-only");
   const batchHelpCompare = document.getElementById("batch-help-compare");
   const batchFileInput = document.getElementById("batch_file");
   const imagesArchiveInput = document.getElementById("images_archive");
+  const batchStatusShell = document.getElementById("batch-status-shell");
   const coverageCard = document.getElementById("coverage-card");
   const coverageRunState = document.getElementById("coverage-run-state");
   const coverageRunMessage = document.getElementById("coverage-run-message");
@@ -77,6 +81,22 @@
       return input.checked;
     });
     applyBatchReviewMode(selectedBatchMode ? selectedBatchMode.value : "batch_label_only");
+  }
+
+  if (batchForm && batchSubmitBtn && batchRunningState) {
+    batchForm.addEventListener("submit", function () {
+      if (batchForm.dataset.running === "true") {
+        return;
+      }
+      batchForm.dataset.running = "true";
+      batchSubmitBtn.disabled = true;
+      batchSubmitBtn.textContent = "Running Batch Analysis...";
+      batchRunningState.hidden = false;
+    });
+  }
+
+  if (batchStatusShell) {
+    startBatchStatusPolling();
   }
 
   if (analyzeButton && ocrStatusBanner && ocrStatusMessage && ocrStatusError) {
@@ -228,23 +248,22 @@
     if (!lightbox || !lightboxImage) {
       return;
     }
-    const zoomableImages = document.querySelectorAll(".js-lightbox-image");
-    if (zoomableImages.length === 0) {
-      return;
-    }
-    zoomableImages.forEach(function (img) {
-      img.addEventListener("click", function () {
-        const source = img.getAttribute("src");
-        if (!source) {
-          return;
-        }
-        lightboxImage.setAttribute("src", source);
-        if (lightboxTitle) {
-          lightboxTitle.textContent = img.dataset.lightboxTitle || "Image";
-        }
-        lightbox.hidden = false;
-        lightbox.setAttribute("aria-hidden", "false");
-      });
+    document.addEventListener("click", function (event) {
+      const target = event.target instanceof Element ? event.target.closest(".js-lightbox-image") : null;
+      if (!target) {
+        return;
+      }
+      const source = target.getAttribute("data-lightbox-src") || target.getAttribute("src");
+      if (!source) {
+        return;
+      }
+      event.preventDefault();
+      lightboxImage.setAttribute("src", source);
+      if (lightboxTitle) {
+        lightboxTitle.textContent = target.getAttribute("data-lightbox-title") || "Image";
+      }
+      lightbox.hidden = false;
+      lightbox.setAttribute("aria-hidden", "false");
     });
     lightbox.querySelectorAll("[data-lightbox-close]").forEach(function (target) {
       target.addEventListener("click", closeLightbox);
@@ -311,6 +330,197 @@
       fetchCoverageStatus();
       window.setInterval(fetchCoverageStatus, 2000);
     }
+  }
+
+  function startBatchStatusPolling() {
+    const pollUrl = batchStatusShell.dataset.pollUrl;
+    if (!pollUrl) {
+      return;
+    }
+    const rawInterval = Number(batchStatusShell.dataset.pollIntervalMs || "2000");
+    const intervalMs = Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : 2000;
+
+    const fetchAndApply = async function () {
+      try {
+        const response = await fetch(pollUrl, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          return { done: false };
+        }
+        const payload = await response.json();
+        applyBatchStatus(payload);
+        const status = typeof payload.status === "string" ? payload.status : "";
+        return { done: status === "completed" || status === "failed" };
+      } catch (_) {
+        return { done: false };
+      }
+    };
+
+    fetchAndApply().then(function (result) {
+      if (result.done) {
+        return;
+      }
+      const timer = window.setInterval(async function () {
+        const next = await fetchAndApply();
+        if (next.done) {
+          window.clearInterval(timer);
+        }
+      }, intervalMs);
+    });
+  }
+
+  function applyBatchStatus(payload) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    const statusBadge = document.getElementById("batch-status-badge");
+    const processedCount = document.getElementById("batch-processed-count");
+    const elapsedMs = document.getElementById("batch-elapsed-ms");
+    const summaryTotal = document.getElementById("batch-summary-total");
+    const summaryMatch = document.getElementById("batch-summary-match");
+    const summaryNormalized = document.getElementById("batch-summary-normalized");
+    const summaryMismatch = document.getElementById("batch-summary-mismatch");
+    const summaryReview = document.getElementById("batch-summary-review");
+    const summaryPass = document.getElementById("batch-summary-pass");
+    const summaryFail = document.getElementById("batch-summary-fail");
+    const summaryReviewLabel = document.getElementById("batch-summary-review-label");
+    const downloadActions = document.getElementById("batch-download-actions");
+    const errorsCard = document.getElementById("batch-errors-card");
+    const errorsList = document.getElementById("batch-errors-list");
+    const rowsBody = document.getElementById("batch-results-body");
+    const emptyMessage = document.getElementById("batch-results-empty");
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+    const status = typeof payload.status === "string" ? payload.status : "queued";
+
+    if (statusBadge) {
+      statusBadge.textContent = status;
+      statusBadge.className = `badge badge-${status}`;
+    }
+    if (processedCount) {
+      processedCount.textContent = String(payload.processed_records ?? 0);
+    }
+    if (elapsedMs) {
+      elapsedMs.textContent = String(payload.elapsed_ms ?? 0);
+    }
+    if (summaryTotal) {
+      summaryTotal.textContent = String(summary.total ?? 0);
+    }
+    if (summaryMatch) {
+      summaryMatch.textContent = String(summary.match ?? 0);
+    }
+    if (summaryNormalized) {
+      summaryNormalized.textContent = String(summary.normalized_match ?? 0);
+    }
+    if (summaryMismatch) {
+      summaryMismatch.textContent = String(summary.mismatch ?? 0);
+    }
+    if (summaryReview) {
+      summaryReview.textContent = String(summary.review ?? 0);
+    }
+    if (summaryPass || summaryFail || summaryReviewLabel) {
+      let passCount = 0;
+      let failCount = 0;
+      let reviewCount = 0;
+      rows.forEach(function (row) {
+        const display = typeof row.display_status === "string" ? row.display_status : "";
+        if (display === "pass") {
+          passCount += 1;
+        } else if (display === "fail") {
+          failCount += 1;
+        } else if (display === "review") {
+          reviewCount += 1;
+        }
+      });
+      if (summaryPass) {
+        summaryPass.textContent = String(passCount);
+      }
+      if (summaryFail) {
+        summaryFail.textContent = String(failCount);
+      }
+      if (summaryReviewLabel) {
+        summaryReviewLabel.textContent = String(reviewCount);
+      }
+    }
+    if (downloadActions) {
+      downloadActions.hidden = status !== "completed";
+    }
+    if (errorsCard && errorsList) {
+      const errors = Array.isArray(payload.errors) ? payload.errors : [];
+      errorsCard.hidden = errors.length === 0;
+      errorsList.innerHTML = "";
+      errors.forEach(function (message) {
+        const li = document.createElement("li");
+        li.textContent = String(message);
+        errorsList.appendChild(li);
+      });
+    }
+    if (rowsBody) {
+      rowsBody.innerHTML = rows.map(renderBatchRow).join("");
+    }
+    if (emptyMessage) {
+      if (rows.length > 0) {
+        emptyMessage.hidden = true;
+      } else {
+        emptyMessage.hidden = false;
+        if (status === "queued" || status === "running") {
+          emptyMessage.textContent = "Batch is in progress. Record rows will appear as processing completes.";
+        } else if (status === "failed") {
+          emptyMessage.textContent = "Batch run failed before producing complete record rows.";
+        } else {
+          emptyMessage.textContent = "No record results are available yet.";
+        }
+      }
+    }
+  }
+
+  function renderBatchRow(row) {
+    const detailUrl = safeText(row.detail_url || "#");
+    const recordId = safeText(row.record_id || "-");
+    const imageUrl = safeText(row.image_url || "");
+    const imageFilename = safeText(row.image_filename || "-");
+    const displayStatus = safeText(row.display_status || "review");
+    const internalStatus = safeText(row.internal_status || "review");
+    const mainReason = safeText(row.main_reason || "-");
+    const timingMs = safeText(String(row.timing_ms ?? 0));
+
+    let imageCell = "-";
+    if (imageUrl) {
+      if (isTiffImage(imageFilename, imageUrl)) {
+        imageCell = `<div class="batch-preview-fallback"><span class="file-icon" title="TIFF preview unsupported">TIFF</span><span class="help-text">Preview unavailable</span><a href="${imageUrl}" target="_blank" rel="noopener noreferrer">Open File</a></div>`;
+      } else {
+        imageCell = `<img src="${imageUrl}" alt="Thumbnail for ${recordId}" class="batch-thumb js-lightbox-image" data-lightbox-title="Batch Record ${recordId} Image">`;
+      }
+    } else if (imageFilename && imageFilename !== "-") {
+      imageCell = '<span class="file-icon" title="Image file name available">IMG</span>';
+    }
+
+    return `<tr>
+      <td class="batch-col-details"><a href="${detailUrl}">View</a></td>
+      <td class="batch-col-record-id">${recordId}</td>
+      <td class="batch-col-image">${imageCell}</td>
+      <td>${imageFilename}</td>
+      <td><span class="badge badge-${displayStatus}">${displayStatus}</span></td>
+      <td><span class="badge badge-${internalStatus}">${internalStatus}</span></td>
+      <td>${mainReason}</td>
+      <td class="batch-col-timing">${timingMs}</td>
+    </tr>`;
+  }
+
+  function isTiffImage(filename, imageUrl) {
+    const candidate = `${filename || ""} ${imageUrl || ""}`.toLowerCase();
+    return candidate.includes(".tif") || candidate.includes(".tiff");
+  }
+
+  function safeText(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   async function fetchCoverageStatus() {

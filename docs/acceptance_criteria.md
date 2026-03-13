@@ -97,6 +97,19 @@ The UI must display:
 - comparison results
 - overall recommendation
 
+Single-result table behavior:
+
+- In Label-Only Review, hide the `Submitted` column.
+- In Compare to Application Data mode, show the `Submitted` column.
+
+Single/batch detail parity behavior (MVP groundwork):
+
+- Batch record detail should use the same core result sections/semantics as single-label
+  result rendering (badge semantics, field rows, confidence labels, rule snippets where available).
+- The only intentional navigation difference is:
+  - single result: analyze-another-label action
+  - batch detail: back-to-batch-report action
+
 ---
 
 # Error Handling
@@ -114,6 +127,18 @@ Batch processing may accept:
 CSV plus label images.
 
 This feature is optional but recommended.
+
+If batch UI is enabled, expected MVP behavior:
+
+- batch submission enqueues work and redirects immediately to persisted report URL
+- submit action immediately shows submitted/running state (disabled button + spinner/copy)
+- report page shows queued/running/completed/failed status and polls persisted status endpoint
+- summary counts and record rows refresh progressively from persisted artifacts
+- resulting report is addressable at a persisted batch report URL
+- batch detail pages provide a back-link to that exact report URL
+- unfinished batch detail requests must return a clear not-ready response without crashing
+- report and detail resources must load from persisted artifacts after redirect
+  without relying on transient form-page state
 
 ---
 

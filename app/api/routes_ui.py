@@ -12,12 +12,12 @@ from fastapi.templating import Jinja2Templates
 from app.config import get_settings
 from app.dependencies import get_dev_diagnostics_service, get_ocr_service
 from app.domain.enums import FieldStatus, LabelType, OverallStatus, ProductProfile
-from app.domain.models import AnalyzeResponse, ApplicationData, FieldResult, ParsedFields
+from app.domain.models import AnalyzeResponse, ApplicationData, FieldResult, OCREvidenceLine, ParsedFields
 from app.services.inference_service import coerce_product_profile, infer_label_type, infer_product_profile
-from app.services.matching_service import build_field_results, coerce_label_type, priority_fields_for_label_type
+from app.services.matching_service import build_field_results, coerce_label_type
 from app.services.parser_service import parse_ocr_text
-from app.services.rule_registry import build_rule_trace, short_rule_tags
-from app.services.result_explanation_service import build_result_explanation, evidence_confidence_for_field
+from app.services.rule_registry import build_rule_trace
+from app.services.result_presenter import build_result_view_from_analysis
 from app.services.visualization_service import create_annotated_ocr_artifact
 
 if TYPE_CHECKING:
@@ -217,6 +217,8 @@ async def analyze_ui(
             status_code=400,
         )
 
+    uploaded_path = _persist_upload(image_bytes=image_bytes, original_name=image.filename or "upload")
+    uploaded_image_url = f"/storage/{uploaded_path}"
     analysis = _run_analysis(
         image_bytes=image_bytes,
         filename=image.filename or "upload",
@@ -228,52 +230,27 @@ async def analyze_ui(
         storage_dir=Path(settings.storage_dir),
         ocr_service=ocr_service,
     )
-    uploaded_path = _persist_upload(image_bytes=image_bytes, original_name=image.filename or "upload")
-    inference_payload = _extract_inference(analysis)
-    effective_label_type = coerce_label_type(inference_payload["label_type"].get("effective_label_type"))
-    effective_product_profile = coerce_product_profile(inference_payload["product_profile"].get("effective_profile"))
-    detected_label_type = coerce_label_type(inference_payload["label_type"].get("detected_label_type"))
-    detected_profile = coerce_product_profile(inference_payload["product_profile"].get("detected_profile"))
-    explanation = build_result_explanation(
+    result_view = build_result_view_from_analysis(
         analysis=analysis,
-        parsed=analysis.parsed,
         review_mode=review_mode,
-        effective_label_type=effective_label_type,
-        effective_product_profile=effective_product_profile,
         field_labels=FIELD_LABELS,
+        label_type_labels=LABEL_TYPE_LABELS,
+        product_profile_labels=PRODUCT_PROFILE_LABELS,
+        label_type_hint=resolved_label_type,
+        product_profile_hint=resolved_product_profile,
+        uploaded_filename=image.filename or "upload",
+        uploaded_image_url=uploaded_image_url,
+        annotated_image_url=analysis.artifacts.get("annotated_image_path"),
+        page_heading="Analysis Result",
+        nav_label="Analyze Another Label",
+        nav_url="/",
     )
-    field_rows = _build_field_rows(analysis, effective_label_type, parsed=analysis.parsed, priority_fields=explanation.priority_fields)
-
     return templates.TemplateResponse(
         request=request,
         name="result.html",
         context={
             "title": "Analysis Result",
-            "analysis": analysis,
-            "review_mode": review_mode,
-            "field_rows": field_rows,
-            "uploaded_image_url": f"/storage/{uploaded_path}",
-            "annotated_image_url": analysis.artifacts.get("annotated_image_path"),
-            "uploaded_filename": image.filename or "upload",
-            "overall_recommendation": _overall_recommendation(analysis.overall_status.value),
-            "ui_overall_badge": explanation.ui_overall_badge,
-            "ui_overall_label": explanation.ui_overall_label,
-            "ui_overall_reason": explanation.ui_overall_reason,
-            "overall_evidence_confidence": explanation.overall_evidence_confidence,
-            "priority_summary": explanation.priority_summary,
-            "non_priority_notice": explanation.non_priority_notice,
-            "top_contributing_fields": explanation.top_contributing_fields,
-            "top_rules": explanation.top_rules,
-            "rule_trace_details": explanation.rule_trace_details,
-            "ocr_errors": analysis.errors,
-            "review_reasons": analysis.review_reasons,
-            "label_type_display": LABEL_TYPE_LABELS[effective_label_type],
-            "label_type_hint_display": LABEL_TYPE_LABELS[resolved_label_type],
-            "detected_label_type_display": LABEL_TYPE_LABELS[detected_label_type],
-            "product_profile_display": PRODUCT_PROFILE_LABELS[effective_product_profile],
-            "product_profile_hint_display": PRODUCT_PROFILE_LABELS[resolved_product_profile],
-            "detected_product_profile_display": PRODUCT_PROFILE_LABELS[detected_profile],
-            "inference_payload": inference_payload,
+            "result_view": result_view,
         },
     )
 
@@ -412,16 +389,33 @@ def _run_analysis(
 ) -> AnalyzeResponse:
     started = time.perf_counter()
     variant_image = None
+    variant_metadata: dict[str, object] = {}
     try:
-        ocr_run = ocr_service.run_ocr_bytes(image_bytes, source_label=filename, return_variant_image=True)
+        ocr_run = ocr_service.run_ocr_bytes(
+            image_bytes,
+            source_label=filename,
+            return_variant_image=True,
+            return_variant_metadata=True,
+        )
     except TypeError:
         ocr_run = ocr_service.run_ocr_bytes(image_bytes, source_label=filename)
 
-    if isinstance(ocr_run, tuple) and len(ocr_run) == 3:
+    if isinstance(ocr_run, tuple) and len(ocr_run) == 4:
+        ocr, ocr_errors, variant_image, variant_metadata = ocr_run
+    elif isinstance(ocr_run, tuple) and len(ocr_run) == 3:
         ocr, ocr_errors, variant_image = ocr_run
     else:
         ocr, ocr_errors = ocr_run
     artifacts: dict[str, object] = {}
+    evidence_lines: list[OCREvidenceLine] = []
+    if isinstance(variant_metadata.get("evidence_lines"), list):
+        for raw in variant_metadata["evidence_lines"]:
+            if isinstance(raw, dict):
+                try:
+                    evidence_lines.append(OCREvidenceLine.model_validate(raw))
+                except Exception:
+                    continue
+
     try:
         pre_parsed = parse_ocr_text(ocr, product_profile=ProductProfile.UNKNOWN)
         profile_inference = infer_product_profile(selected_hint=product_profile, ocr=ocr, parsed=pre_parsed)
@@ -449,15 +443,27 @@ def _run_analysis(
         )
         artifacts["inference"] = {"product_profile": profile_inference, "label_type": label_inference}
         artifacts["rule_trace"] = build_rule_trace(rule_ids_by_field)
+        if evidence_lines:
+            artifacts["ocr_evidence"] = [line.model_dump() for line in evidence_lines]
+            artifacts["parsed_field_evidence"] = _build_parsed_field_evidence_links(parsed=parsed, evidence_lines=evidence_lines)
         if enable_visualization:
-            annotated_path = create_annotated_ocr_artifact(
+            source_variant_id = variant_metadata.get("source_variant_id")
+            bbox_space_hint = variant_metadata.get("bbox_space")
+            annotation_result = create_annotated_ocr_artifact(
                 image_bytes=image_bytes,
                 ocr=ocr,
                 storage_dir=storage_dir,
                 parsed=parsed,
                 base_image=variant_image,
-                bbox_space_hint="render_pixels" if variant_image is not None else "auto",
+                evidence_lines=evidence_lines,
+                source_variant_id=str(source_variant_id) if isinstance(source_variant_id, str) and source_variant_id else None,
+                bbox_space_hint=str(bbox_space_hint) if isinstance(bbox_space_hint, str) and bbox_space_hint else "unknown",
+                allow_legacy_fallback=False,
+                return_metadata=True,
             )
+            annotated_path, annotation_payload, annotation_debug = annotation_result
+            artifacts["annotation"] = annotation_payload
+            artifacts["annotation_debug"] = annotation_debug
             if annotated_path:
                 artifacts["annotated_image_path"] = f"/storage/{annotated_path}"
             elif ocr.lines:
@@ -514,60 +520,6 @@ def _persist_upload(image_bytes: bytes, original_name: str) -> str:
     target_path = upload_dir / target_name
     target_path.write_bytes(image_bytes)
     return f"uploads/{target_name}"
-
-
-def _build_field_rows(
-    analysis: AnalyzeResponse,
-    label_type: LabelType,
-    parsed: ParsedFields,
-    priority_fields: list[str],
-) -> list[dict[str, str | None]]:
-    rows: list[dict[str, str | None]] = []
-    confidence_bands = {"high", "medium", "low", "unknown"}
-    priority_field_set = set(priority_fields)
-    is_hint_mode = label_type != LabelType.UNKNOWN
-    for field_name, label in FIELD_LABELS.items():
-        result = analysis.field_results.get(field_name)
-        if result is None:
-            continue
-        notes = result.notes
-        rule_ids = _rule_ids_for_field(analysis, field_name)
-        if rule_ids:
-            notes = f"{notes or ''}{short_rule_tags(rule_ids)}".strip()
-        if is_hint_mode and field_name not in priority_field_set:
-            info_note = "Informational for selected label type."
-            notes = f"{notes} {info_note}".strip() if notes else info_note
-        confidence = evidence_confidence_for_field(
-            field_name=field_name,
-            status=result.status,
-            parsed=parsed,
-        )
-        normalized_confidence = confidence.lower().strip() if isinstance(confidence, str) else "unknown"
-        if normalized_confidence not in confidence_bands:
-            normalized_confidence = "unknown"
-        rows.append(
-            {
-                "field_name": field_name,
-                "label": label,
-                "submitted_value": result.submitted_value,
-                "detected_value": result.detected_value,
-                "status": result.status.value,
-                "is_priority": field_name in priority_field_set,
-                "evidence_confidence": normalized_confidence,
-                "notes": notes,
-            }
-        )
-    return rows
-
-
-def _overall_recommendation(overall_status: str) -> str:
-    if overall_status == "match":
-        return "Looks consistent. Reviewer can do a quick confirmation."
-    if overall_status == "normalized_match":
-        return "Mostly consistent after normalization. Reviewer should spot-check."
-    if overall_status == "mismatch":
-        return "Potential mismatch found. Reviewer should inspect differences carefully."
-    return "Manual review required due to uncertainty or missing evidence."
 
 
 def _empty_form_values() -> dict[str, str]:
@@ -664,32 +616,6 @@ def _parse_allowed_csv(raw_value: object, valid_order: list[str]) -> list[str]:
     return output or valid_order
 
 
-def _extract_inference(analysis: AnalyzeResponse) -> dict[str, dict[str, object]]:
-    payload = analysis.artifacts.get("inference", {})
-    if isinstance(payload, dict):
-        product_profile = payload.get("product_profile", {})
-        label_type = payload.get("label_type", {})
-        if isinstance(product_profile, dict) and isinstance(label_type, dict):
-            return {"product_profile": product_profile, "label_type": label_type}
-    return {"product_profile": {}, "label_type": {}}
-
-
-def _rule_ids_for_field(analysis: AnalyzeResponse, field_name: str) -> list[str]:
-    payload = analysis.artifacts.get("rule_trace", {})
-    if not isinstance(payload, dict):
-        return []
-    entries = payload.get(field_name)
-    if not isinstance(entries, list):
-        return []
-    rule_ids: list[str] = []
-    for entry in entries:
-        if isinstance(entry, dict):
-            rule_id = entry.get("rule_id")
-            if isinstance(rule_id, str):
-                rule_ids.append(rule_id)
-    return rule_ids
-
-
 def _review_field_results(application: ApplicationData) -> dict[str, FieldResult]:
     fields = {
         "brand_name": application.brand_name,
@@ -709,6 +635,40 @@ def _review_field_results(application: ApplicationData) -> dict[str, FieldResult
         )
         for name, submitted in fields.items()
     }
+
+
+def _build_parsed_field_evidence_links(parsed: ParsedFields, evidence_lines: list[OCREvidenceLine]) -> dict[str, dict[str, object]]:
+    field_values = {
+        "brand_name": parsed.brand_name.value,
+        "class_type": parsed.class_type.value,
+        "alcohol_content": parsed.alcohol_content.raw,
+        "net_contents": parsed.net_contents.raw,
+        "bottler_producer": parsed.bottler_producer.value,
+        "country_of_origin": parsed.country_of_origin.value,
+        "government_warning": parsed.government_warning.value,
+    }
+    output: dict[str, dict[str, object]] = {}
+    for field_name, value in field_values.items():
+        if not value:
+            continue
+        tokens = [token for token in " ".join(value.lower().split()).split(" ") if len(token) >= 5]
+        if not tokens:
+            continue
+        matched_ids: list[str] = []
+        confidences: list[float] = []
+        for line in evidence_lines:
+            lowered = line.text.lower()
+            if any(token in lowered for token in tokens):
+                matched_ids.append(line.id)
+                confidences.append(line.confidence)
+        if matched_ids:
+            avg_confidence = round(sum(confidences) / len(confidences), 4) if confidences else None
+            output[field_name] = {
+                "supporting_evidence_ids": matched_ids,
+                "confidence_source": "ocr_evidence_average",
+                "confidence_value": avg_confidence,
+            }
+    return output
 
 
 def _format_ocr_status(status_payload: dict[str, object]) -> dict[str, object]:
