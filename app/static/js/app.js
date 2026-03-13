@@ -394,6 +394,7 @@
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
     const status = typeof payload.status === "string" ? payload.status : "queued";
+    const isTerminal = status === "completed" || status === "failed";
 
     if (statusBadge) {
       statusBadge.textContent = status;
@@ -446,6 +447,16 @@
     }
     if (downloadActions) {
       downloadActions.hidden = status !== "completed";
+    }
+    if (batchRunningState) {
+      batchRunningState.hidden = true;
+    }
+    if (batchForm && isTerminal) {
+      batchForm.dataset.running = "false";
+    }
+    if (batchSubmitBtn && isTerminal) {
+      batchSubmitBtn.disabled = false;
+      batchSubmitBtn.textContent = "Run Batch Analysis";
     }
     if (errorsCard && errorsList) {
       const errors = Array.isArray(payload.errors) ? payload.errors : [];

@@ -1,143 +1,105 @@
-# AI-Powered Alcohol Label Verification
+# AI-Powered Alcohol Label Verification (MVP)
 
-Time-boxed prototype for assisting human reviewers with alcohol label checks.
+AI-assisted alcohol label review prototype for human reviewers.
 
-## What this prototype does and does not do
+This MVP extracts label text locally, parses key fields, compares against submitted application data (when provided), and presents conservative reviewer guidance. It is designed to help reviewers work faster, not replace reviewer judgment.
 
-What it does:
-- Extracts label text locally with OCR.
-- Parses key fields and compares against submitted application data.
-- Surfaces field-level statuses and review reasons for a human reviewer.
-- Supports single-label and MVP batch workflows.
+## What This MVP Does
 
-What it does not do:
-- It does not auto-approve or replace reviewer judgment.
-- It does not implement full legal/compliance interpretation.
-- It does not use external/cloud AI services in the core pipeline.
-- It is not optimized for high-throughput production scale.
+- Runs OCR locally with PaddleOCR (no cloud OCR/API calls in the core path).
+- Supports **Single Label Review** for rapid per-label analysis.
+- Supports **Batch Label Review** with a report-first async UI workflow.
+- Returns field-level outcomes (`match`, `normalized_match`, `mismatch`, `review`) and a conservative overall recommendation.
+- Preserves canonical result/detail URLs for batch reports.
 
-## Stack
+## What This MVP Does Not Do
 
-- FastAPI
-- Jinja2
-- PaddleOCR (not wired yet in this scaffold step)
-- OpenCV
-- SQLite
-- Docker
+- Does not auto-approve labels or make final compliance decisions.
+- Does not implement full legal/compliance adjudication.
+- Does not target production-scale distributed processing in this phase.
+- Does not claim formal legal/procurement/security/accessibility certification.
 
-## Run Locally (Docker)
+## Architecture Snapshot
+
+- **Single service** FastAPI application.
+- **Thin routes** in API/UI layers.
+- Business logic in services/domain modules.
+- Local-first OCR pipeline with PaddleOCR.
+- Rule-traceable, deterministic reviewer assistance with human-review-first fallbacks.
+
+See canonical architecture docs:
+- [docs/architecture.md](docs/architecture.md)
+- [docs/api_contract.md](docs/api_contract.md)
+- [docs/data_models.md](docs/data_models.md)
+
+## Quick Start (Docker)
 
 ```bash
 docker compose up --build
 ```
 
-App will be available at `http://localhost:8000`.
+Open:
+- `http://localhost:8000/` (single review)
+- `http://localhost:8000/ui/batch` (batch review)
 
-## Run Locally (Without Compose)
-
-```bash
-docker build -t alcohol-label-verifier .
-docker run --rm -p 8000:8000 \
-  -e HOST=0.0.0.0 \
-  -e PORT=8000 \
-  -e APP_ENV=development \
-  -e STORAGE_DIR=/app/runtime \
-  -e SAMPLE_DATA_DIR=/app/data \
-  -v "$(pwd)/data:/app/data" \
-  alcohol-label-verifier
-```
-
-## Key Endpoints
-
-- `GET /` reviewer UI
-- `GET /healthz`
-- `GET /readyz`
-- `POST /api/v1/analyze`
-- `POST /api/v1/batch/analyze`
-
-## Example Analyze Request
+Health checks:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/analyze" \
-  -F "image=@data/samples/label.jpg" \
-  -F 'application_json={"brand_name":"Example","class_type":"Whiskey","alcohol_content":"45% Alc./Vol.","net_contents":"750 mL","bottler_producer":"Bottled by Example","country_of_origin":"United States","government_warning":"GOVERNMENT WARNING: ..."}'
+curl -s http://localhost:8000/healthz
+curl -s http://localhost:8000/readyz
 ```
 
-Current behavior runs local OCR and returns field-level match outcomes with conservative `review` behavior for uncertain detections.
+## Main Workflows
 
-## OCR Smoke Test
+### Single Label Review
 
-If the app is running and you have demo sample files in `data/sample_inputs/...`, run:
+1. Upload one label image on `/`.
+2. Choose mode:
+   - **Label-Only Review** (no application fields required), or
+   - **Compare to Application Data** (submitted fields/JSON).
+3. Analyze and review:
+   - result badge,
+   - field rows with rationales,
+   - OCR text,
+   - uploaded image and annotated OCR evidence (when canonical evidence is available).
 
-```bash
-bash scripts/smoke_test.sh
-```
+### Batch Label Review
 
-Optional env overrides:
-- `IMAGE_PATH=/path/to/label.jpg`
-- `APP_JSON_PATH=/path/to/application.json`
-- `BASE_URL=http://localhost:8000`
-- `ENABLE_DIAGNOSTICS_UI=true` (enables developer-only `/ui/diagnostics`)
+1. Open `/ui/batch`.
+2. Choose mode:
+   - **Batch Label-Only Review**: images ZIP only.
+   - **Batch Compare to Application Data**: compare CSV/JSON + images ZIP.
+3. Submit batch and land on persisted report URL (`/ui/batch/{batch_id}`).
+4. Monitor queued/running/completed/failed status and drill into record detail pages.
 
-## Coverage Workflow (Developer)
+## Reviewer Use vs Developer Benchmark Use
 
-Generate latest coverage artifacts without running tests on each diagnostics request:
+- **Reviewer-facing use**: single and batch UI workflows for label assessment support.
+- **Developer/benchmark use**: scrape COLA records, build benchmark packs, run repeatable OCR experiments.
 
-```bash
-make coverage
-```
+## Repository Layout
 
-This writes:
-- terminal coverage summary in command output
-- HTML report at `runtime/coverage/html/index.html`
-- JSON summary at `runtime/coverage/coverage.json`
+- `data/cola_raw/...` — raw COLA scrape outputs.
+- `cola_batches/benchmark_v1/...` — benchmark pack artifacts.
+- `experiments/...` — experiment runs/logs/results.
+- `scripts/` — utility tooling (`cola_registry_scraper.py`, `cola_batch_builder.py`, etc.).
 
-When diagnostics UI is enabled, `/ui/diagnostics` shows the latest known coverage summary if the JSON artifact exists.
+## Deeper Documentation
 
-## UI Demo Flow
+- [Benchmark Pack Spec](docs/benchmark_pack_spec.md)
+- [Experiment Log Spec](docs/experiment_log_spec.md)
+- [Developer Data + Experiment Workflow](docs/developer_data_and_experiment_workflow.md)
+- [MVP Design Decisions](docs/mvp_design_decisions.md)
+- [Requirements Traceability](docs/requirements_traceability.md)
+- [Azure Deployment (Canonical)](docs/deployment_azure.md)
+- [Policy Alignment Notes (Cautious)](docs/policy_alignment_notes.md)
+- [Acceptance Criteria](docs/acceptance_criteria.md)
+- [Project Scope](docs/project_scope.md)
+- [Rule Registry](docs/rule_registry.md)
 
-1. Open `http://localhost:8000`.
-2. Upload one label image.
-3. Keep default **Label-Only Review** for fast screening, or switch to **Compare to Application Data**.
-4. In Compare mode, enter fields or paste `application_json`.
-5. Click **Analyze Label**.
-6. Review the result page:
-   uploaded image, OCR text, side-by-side field table, status badges, timing, and overall recommendation.
+## Current Limitations and Next-Step Areas
 
-Batch modes on `/ui/batch`:
-- **Batch Label-Only Review** (default): upload an images ZIP to screen many labels without application records.
-- **Batch Compare to Application Data**: upload CSV/JSON plus matching images ZIP for side-by-side validation.
-
-## Demo Assets
-
-Application JSON samples:
-- `data/sample_inputs/applications/01_clean_passing.json`
-- `data/sample_inputs/applications/02_normalized_brand_match.json`
-- `data/sample_inputs/applications/03_warning_statement_issue.json`
-
-Batch data samples:
-- `data/sample_inputs/batches/demo_batch.csv`
-- `data/sample_inputs/batches/demo_batch.json`
-
-Placeholder image structure:
-- `data/sample_inputs/labels/01_clean_passing/`
-- `data/sample_inputs/labels/02_normalized_brand_match/`
-- `data/sample_inputs/labels/03_warning_statement_issue/`
-
-## Screenshots (Placeholders)
-
-- `docs/screenshots/01-upload-form.png` (to be added)
-- `docs/screenshots/02-result-summary.png` (to be added)
-- `docs/screenshots/03-field-comparison-table.png` (to be added)
-
-## Azure App Service Deployment
-
-This repository is ready for Azure App Service custom Linux containers.
-
-Key deployment points:
-- Container listens on `0.0.0.0:8000`.
-- Set `WEBSITES_PORT=8000` in App Service.
-- Set health check path to `/healthz`.
-
-Practical deployment guide and CLI examples:
-- [infra/azure/appservice.md](infra/azure/appservice.md)
+- OCR quality can vary by image quality, typography, and label complexity.
+- Some ambiguous results are intentionally surfaced as `review`.
+- Async UI batch execution is local/in-process MVP groundwork, not a production-grade distributed worker model.
+- Additional OCR/backend tuning is expected via benchmark-pack experiment loops.

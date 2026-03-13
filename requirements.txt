@@ -11,3 +11,4 @@ paddlepaddle==3.2.2
 pytest
 pytest-cov
 httpx
+beautifulsoup4

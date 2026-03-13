@@ -365,6 +365,7 @@ def test_batch_report_route_loads_persisted_summary(client):
     assert report.status_code == 200
     assert f"/ui/batch/{batch_id}" in report.text
     assert "Batch Summary" in report.text
+    assert 'id="batch-running-state" class="batch-running-state" role="status" aria-live="polite" hidden' in report.text
 
 
 def test_batch_ui_tiff_rows_show_preview_unavailable_with_open_file_link(client):
@@ -395,6 +396,7 @@ def test_batch_page_contains_running_state_markup(client):
     assert 'id="batch-review-form"' in response.text
     assert 'id="batch-submit-btn"' in response.text
     assert 'id="batch-running-state"' in response.text
+    assert 'id="batch-running-state" class="batch-running-state" role="status" aria-live="polite" hidden' in response.text
 
 
 def test_batch_status_endpoint_returns_progress_fields(client):
